@@ -1,5 +1,6 @@
 import { HomeScreen } from '@/modules/designs/components/HomeScreen';
 import { buildDocument } from '@/test/factories';
+import { FakeShareStore } from '@/test/fakeShareStore';
 import {
   renderWithProviders,
   testServices,
@@ -104,6 +105,48 @@ describe('HomeScreen', () => {
     await waitFor(() => {
       expect(screen.queryByText('Office party')).not.toBeInTheDocument();
     });
+  });
+
+  it('removes the share link and image of a deleted design', async () => {
+    const shares = new FakeShareStore();
+    const workspace = { ...testWorkspace(), shares };
+    const record = await workspace.designs.create('Shared', buildDocument());
+    const share = await shares.publish({
+      designId: record.id,
+      title: 'Shared',
+      width: 100,
+      height: 100,
+      png: new Uint8Array([0x89]),
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    setup(workspace);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Delete Shared' }),
+    );
+
+    await waitFor(() => {
+      expect(shares.images.has(share.id)).toBe(false);
+    });
+  });
+
+  it('keeps deleting the design if share cleanup fails', async () => {
+    const shares = new FakeShareStore();
+    const workspace = { ...testWorkspace(), shares };
+    await workspace.designs.create('Shared', buildDocument());
+    shares.failNext = new Error('offline');
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const { services } = setup(workspace);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Delete Shared' }),
+    );
+
+    await waitFor(() => {
+      expect(services.logLines.join()).toContain('share.cleanup_failed');
+    });
+    expect(await workspace.designs.list()).toEqual([]);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('reports failures without crashing', async () => {

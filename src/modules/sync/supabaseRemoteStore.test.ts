@@ -290,8 +290,12 @@ describe('SupabaseRemoteStore realtime', () => {
 });
 
 describe('SupabaseRemoteStore.deleteAllFiles', () => {
-  function withListing(pages: { name: string }[][], removeError = null) {
-    const { store, bucket, client } = setup({ data: null, error: null });
+  function withListing(
+    pages: { name: string }[][],
+    removeError = null,
+    shares: { id: string }[] = [],
+  ) {
+    const { store, bucket, client } = setup({ data: shares, error: null });
     const list = vi.fn(() =>
       Promise.resolve({ data: pages.shift() ?? [], error: null }),
     );
@@ -310,6 +314,34 @@ describe('SupabaseRemoteStore.deleteAllFiles', () => {
     expect(list).toHaveBeenCalledWith('user-1', { limit: 100 });
     expect(remove).toHaveBeenNthCalledWith(1, ['user-1/a.png', 'user-1/b.png']);
     expect(remove).toHaveBeenNthCalledWith(2, ['user-1/c.png']);
+  });
+
+  it('also deletes share images, which are named by share id', async () => {
+    const { store, remove, client } = withListing([], null, [
+      { id: 'share-1' },
+    ]);
+
+    await expect(store.deleteAllFiles()).resolves.toBe(1);
+    expect(client.from).toHaveBeenCalledWith('design_shares');
+    expect(client.storage.from).toHaveBeenCalledWith('design-shares');
+    expect(remove).toHaveBeenCalledWith(['share-1.png']);
+  });
+
+  it('fails loudly when share images cannot be listed or removed', async () => {
+    const listing = setup({ data: null, error: { message: 'rls' } });
+    Object.assign(listing.bucket, {
+      list: () => Promise.resolve({ data: [], error: null }),
+    });
+    const removing = withListing([], { message: 'gone' } as never, [
+      { id: 's' },
+    ]);
+
+    await expect(listing.store.deleteAllFiles()).rejects.toThrow(
+      'list shares failed: rls',
+    );
+    await expect(removing.store.deleteAllFiles()).rejects.toThrow(
+      'delete share images failed: gone',
+    );
   });
 
   it('succeeds with nothing to delete', async () => {

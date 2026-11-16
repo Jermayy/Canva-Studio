@@ -12,6 +12,8 @@ export interface ToolbarProps {
   onBack: () => void;
   onFit: () => void;
   onExport: (format: ExportFormat, action: ExportAction) => void;
+  /** Creates/refreshes the view-only link; omitted for guests. */
+  onShareLink?: () => void;
 }
 
 const ZOOM_STEP = 1.2;
@@ -22,6 +24,7 @@ export function Toolbar({
   onBack,
   onFit,
   onExport,
+  onShareLink,
 }: ToolbarProps) {
   const title = useEditor((state) => state.title);
   const zoom = useEditor((state) => state.zoom);
@@ -126,6 +129,16 @@ export function Toolbar({
           <option value="pdf">PDF</option>
           <option value="png">PNG</option>
         </select>
+        {onShareLink && (
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy}
+            onClick={onShareLink}
+          >
+            Copy link
+          </button>
+        )}
         <button
           type="button"
           className="secondary"

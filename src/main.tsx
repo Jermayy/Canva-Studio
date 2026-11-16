@@ -9,6 +9,13 @@ import {
   browserFileEnv,
   createBrowserFileDelivery,
 } from '@/modules/export/fileDelivery';
+import { SharedDesignPage } from '@/modules/share/components/SharedDesignPage';
+import { isSharePath, parseShareId } from '@/modules/share/domain/shareLink';
+import { downloadSharedImage } from '@/modules/share/downloadSharedImage';
+import {
+  SupabaseShareStore,
+  fetchSharedDesign,
+} from '@/modules/share/supabaseShareStore';
 import { SupabaseRemoteStore } from '@/modules/sync/supabaseRemoteStore';
 import { createLogger } from '@/shared/logger';
 import { StrictMode } from 'react';
@@ -43,25 +50,36 @@ try {
     ? createSupabase(config.supabase, window.localStorage)
     : null;
   const auth = supabase ? new AuthService(supabase, logger) : null;
+  const files = createBrowserFileDelivery(browserFileEnv());
+  const { pathname } = window.location;
 
   root.render(
     <StrictMode>
       <ErrorBoundary logger={logger}>
-        <App
-          services={{
-            logger,
-            exporter: new ExportService(
-              createBrowserFileDelivery(browserFileEnv()),
-            ),
-          }}
-          auth={auth}
-          createRemote={(user) => {
-            if (!supabase) {
-              throw new Error('Cloud sync is not configured');
+        {isSharePath(pathname) ? (
+          <SharedDesignPage
+            shareId={parseShareId(pathname)}
+            loadShare={
+              supabase ? (id) => fetchSharedDesign(supabase, id) : null
             }
-            return new SupabaseRemoteStore(supabase, user.id);
-          }}
-        />
+            download={(view) => downloadSharedImage(view, { fetch, files })}
+            logger={logger}
+          />
+        ) : (
+          <App
+            services={{ logger, exporter: new ExportService(files) }}
+            auth={auth}
+            createRemote={(user) => {
+              if (!supabase) {
+                throw new Error('Cloud sync is not configured');
+              }
+              return new SupabaseRemoteStore(supabase, user.id);
+            }}
+            {...(supabase
+              ? { createShares: () => new SupabaseShareStore(supabase) }
+              : {})}
+          />
+        )}
       </ErrorBoundary>
     </StrictMode>,
   );

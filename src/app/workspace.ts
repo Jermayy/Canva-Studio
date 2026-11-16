@@ -6,6 +6,7 @@ import {
   type CanvasStudioDb,
 } from '@/modules/designs/data/localDb';
 import { LocalDesignRepository } from '@/modules/designs/data/localDesignRepository';
+import type { ShareStore } from '@/modules/share/shareStore';
 import type { RemoteDesignStore } from '@/modules/sync/remoteDesignStore';
 import {
   browserLocks,
@@ -29,11 +30,18 @@ export interface Workspace {
   sync: SyncEngine | null;
   /** The cloud store for signed-in users; null for the guest. */
   remote: RemoteDesignStore | null;
+  /** Share links; null for the guest (sharing needs an account). */
+  shares: ShareStore | null;
   dispose: () => void;
 }
 
 export type WorkspaceSession =
-  | { kind: 'cloud'; user: AuthUser; remote: RemoteDesignStore }
+  | {
+      kind: 'cloud';
+      user: AuthUser;
+      remote: RemoteDesignStore;
+      shares?: ShareStore;
+    }
   | { kind: 'guest' };
 
 export interface WorkspaceEnv {
@@ -65,6 +73,7 @@ export function createWorkspace(
       assets,
       sync: null,
       remote: null,
+      shares: null,
       dispose: () => {
         db.close();
       },
@@ -95,6 +104,7 @@ export function createWorkspace(
     assets,
     sync,
     remote: session.remote,
+    shares: session.shares ?? null,
     dispose: () => {
       stopOnline();
       sync.stop();

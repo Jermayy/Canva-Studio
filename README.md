@@ -11,6 +11,7 @@ Making a quick party invite shouldn't need an install or a design degree. Canvas
 - **Canvas editor:** drag, resize, rotate and layer shapes, text, stickers and your own images; inline text editing; undo/redo; keyboard shortcuts; zoom and fit.
 - **Templates and assets:** birthday, Christmas, party and blank templates in poster, square, story and landscape sizes, plus a bundled sticker library.
 - **Export and share:** download as PDF or PNG, or share through the device's share sheet (Web Share API). Browsers that can't share files get a download instead.
+- **Share links:** _Copy link_ creates a view-only link (`/s/<id>`). Anyone with it can see the design as an image and download it, but can't edit it. Copy again to refresh the image; _Stop sharing_ turns the link off.
 - **Accounts:** email/password sign-in through Supabase Auth. Each user's data is isolated by row-level security on the server and by a separate local database in the browser.
 - **Local-first sync:** every edit saves to the browser first. When online, changes upload in the background and arrive live on your other devices (realtime, with polling as a fallback). Conflicting edits never overwrite each other: the server copy wins and your version is kept as a "(conflicted copy)" design.
 - **Guest mode:** use the app without an account; designs then stay in this browser only.
@@ -96,7 +97,9 @@ src/
     designs/          Local database (Dexie/IndexedDB), repositories, home screen
     editor/           Document model, pure operations, undo history, store, canvas UI
     export/           PNG/PDF rendering, file delivery (download / Web Share)
+    account/          Account deletion (use case + dialog)
     library/          Templates, stickers, shapes, side panel
+    share/            Share links: Supabase adapter, editor link bar, public page
     sync/             Sync engine, Supabase adapter, status badge
   test/               Factories, fakes, react-konva mock
 supabase/             SQL migrations (+ rollbacks)
@@ -106,12 +109,13 @@ vercel.json           Hosting config and security headers
 
 ## Architecture
 
-See [docs/architecture.md](docs/architecture.md) and [docs/adr/](docs/adr/). The move from Electron to the web is recorded in [ADR 0005](docs/adr/0005-web-app-on-vercel.md); the session-storage trade-off in [ADR 0006](docs/adr/0006-browser-session-storage.md).
+See [docs/architecture.md](docs/architecture.md) and [docs/adr/](docs/adr/). The move from Electron to the web is recorded in [ADR 0005](docs/adr/0005-web-app-on-vercel.md), the session-storage trade-off in [ADR 0006](docs/adr/0006-browser-session-storage.md), document versioning in [ADR 0007](docs/adr/0007-design-document-schema-versioning.md) and share links in [ADR 0008](docs/adr/0008-view-only-share-links.md).
 
 ## Data and privacy
 
 - **Stored in the browser:** designs and uploaded images in IndexedDB, one database per account. The sign-in session is in localStorage (see ADR 0006).
 - **Stored in the cloud (signed-in users only), in Supabase's Sydney region:** email and password hash (Supabase Auth), designs, and uploaded images.
+- **Public (only what you share):** for each design you share, its title and a PNG image, readable by anyone with the link until you stop sharing. Images may stay in CDN caches for up to a minute after that.
 - **Account deletion (self-service):** _Delete account_ on the home screen, confirmed with your password. It deletes your uploaded files, then your account (which cascades to your designs and share links), then this browser's local copy. The server refuses to delete an account that still has files, so no personal files are orphaned. Each step is safe to retry if it's interrupted.
 
 ## Known gaps

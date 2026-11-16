@@ -91,3 +91,35 @@ describe('Toolbar', () => {
     expect(screen.getByRole('button', { name: 'Exporting…' })).toBeDisabled();
   });
 });
+
+describe('Toolbar share link', () => {
+  afterEach(() => {
+    editorStore.getState().close();
+  });
+
+  it('offers "Copy link" only when sharing is available', async () => {
+    editorStore
+      .getState()
+      .open({ id: 'd', title: 'Party', document: buildDocument() });
+    const onShareLink = vi.fn();
+    const props = { onBack: vi.fn(), onFit: vi.fn(), onExport: vi.fn() };
+    const { rerender } = render(
+      <Toolbar syncStatus={null} busy={false} {...props} />,
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Copy link' }),
+    ).not.toBeInTheDocument();
+
+    rerender(
+      <Toolbar
+        syncStatus={null}
+        busy={false}
+        {...props}
+        onShareLink={onShareLink}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+
+    expect(onShareLink).toHaveBeenCalledOnce();
+  });
+});

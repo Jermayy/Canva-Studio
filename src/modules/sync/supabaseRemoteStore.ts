@@ -9,6 +9,11 @@ import {
   REALTIME_SUBSCRIBE_STATES,
   type SupabaseClient,
 } from '@supabase/supabase-js';
+import {
+  SHARES_BUCKET,
+  SHARES_TABLE,
+  shareImagePath,
+} from '@/modules/share/supabaseShareStore';
 import { z } from 'zod';
 
 export const DESIGNS_TABLE = 'designs';
@@ -224,7 +229,29 @@ export class SupabaseRemoteStore implements RemoteDesignStore {
         deleted += paths.length;
       }
     }
-    return deleted;
+    return deleted + (await this.deleteShareImages());
+  }
+
+  /** Share images are named by share id, not under the user's folder. */
+  private async deleteShareImages(): Promise<number> {
+    const { data, error } = await this.client.from(SHARES_TABLE).select('id');
+    if (error) {
+      throw toError('list shares failed', error);
+    }
+    const paths = z
+      .array(z.object({ id: z.string() }))
+      .parse(data)
+      .map((share) => shareImagePath(share.id));
+    if (paths.length === 0) {
+      return 0;
+    }
+    const { error: removeError } = await this.client.storage
+      .from(SHARES_BUCKET)
+      .remove(paths);
+    if (removeError) {
+      throw toError('delete share images failed', removeError);
+    }
+    return paths.length;
   }
 
   subscribe(

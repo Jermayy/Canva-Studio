@@ -23,6 +23,7 @@ import {
 } from '@/modules/designs/data/localDb';
 import { EditorScreen } from '@/modules/editor/components/EditorScreen';
 import { editorStore } from '@/modules/editor/state/editorStore';
+import type { ShareStore } from '@/modules/share/shareStore';
 import type { RemoteDesignStore } from '@/modules/sync/remoteDesignStore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -30,6 +31,8 @@ export interface AppProps {
   services: AppServices;
   auth: AuthService | null;
   createRemote: (user: AuthUser) => RemoteDesignStore;
+  /** Share links for signed-in users; omitted when unavailable. */
+  createShares?: (user: AuthUser) => ShareStore;
   /** Lets tests inject an isolated environment. */
   workspaceFactory?: typeof createWorkspace;
 }
@@ -63,6 +66,7 @@ export function App({
   services,
   auth,
   createRemote,
+  createShares,
   workspaceFactory = createWorkspace,
 }: AppProps) {
   const [screen, setScreen] = useState<Screen>('loading');
@@ -100,10 +104,15 @@ export function App({
   const startCloud = useCallback(
     (user: AuthUser) => {
       writeGuestPreference(false);
-      activate({ kind: 'cloud', user, remote: createRemote(user) });
+      activate({
+        kind: 'cloud',
+        user,
+        remote: createRemote(user),
+        ...(createShares ? { shares: createShares(user) } : {}),
+      });
       setScreen('home');
     },
-    [activate, createRemote],
+    [activate, createRemote, createShares],
   );
 
   const startGuest = useCallback(() => {

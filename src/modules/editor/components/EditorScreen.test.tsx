@@ -1,6 +1,10 @@
+import { createWorkspace } from '@/app/workspace';
+import { openWorkspaceDb } from '@/modules/designs/data/localDb';
 import { EditorScreen } from '@/modules/editor/components/EditorScreen';
 import { editorStore } from '@/modules/editor/state/editorStore';
 import { buildDocument, buildRect } from '@/test/factories';
+import { FakeRemoteStore } from '@/test/fakeRemoteStore';
+import { FakeShareStore } from '@/test/fakeShareStore';
 import {
   renderWithProviders,
   testServices,
@@ -8,6 +12,7 @@ import {
 } from '@/test/renderWithProviders';
 import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { createLogger } from '@/shared/logger';
 
 async function setup() {
   const workspace = testWorkspace();
@@ -112,5 +117,173 @@ describe('EditorScreen', () => {
     });
 
     expect(screen.getByRole('alert')).toHaveTextContent('at most 500');
+  });
+});
+
+describe('EditorScreen share links', () => {
+  const writeText = vi.fn(() => Promise.resolve());
+
+  beforeEach(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+  });
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, 'clipboard');
+  });
+
+  async function setupCloud(
+    shares = new FakeShareStore(),
+    { alreadyShared = false } = {},
+  ) {
+    const remote = new FakeRemoteStore();
+    const services = testServices();
+    const workspace = createWorkspace(
+      {
+        kind: 'cloud',
+        user: { id: 'user-1', email: 'sam@example.com' },
+        remote,
+        shares,
+      },
+      {
+        logger: createLogger({ service: 'test', sink: () => {} }),
+        isOnline: () => true,
+        onOnline: () => () => {},
+        openDb: (id) => openWorkspaceDb(`${id}-${crypto.randomUUID()}`),
+        locks: undefined,
+      },
+    );
+    const record = await workspace.designs.create(
+      'Party',
+      buildDocument([buildRect()]),
+    );
+    if (alreadyShared) {
+      await shares.publish({
+        designId: record.id,
+        title: 'Party',
+        width: 100,
+        height: 100,
+        png: new Uint8Array([0x89]),
+      });
+    }
+    editorStore.getState().open(record);
+    const view = renderWithProviders(<EditorScreen onClose={vi.fn()} />, {
+      workspace,
+      services,
+    });
+    return { ...view, shares, remote, record, services, workspace };
+  }
+
+  afterEach(() => {
+    editorStore.getState().close();
+  });
+
+  it('is not offered to guests', async () => {
+    await setup();
+
+    expect(
+      screen.queryByRole('button', { name: 'Copy link' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('syncs the design, publishes an image and copies the view link', async () => {
+    const { shares, remote, record, workspace } = await setupCloud();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+
+    expect(
+      await screen.findByText(/Link copied. Anyone with it can view/),
+    ).toBeInTheDocument();
+    const share = shares.shares.get(record.id);
+    expect(share).toMatchObject({ title: 'Party' });
+    expect(shares.images.get(share!.id)?.[0]).toBe(0x89);
+    expect(remote.rows.has(record.id)).toBe(true);
+    const url = `${window.location.origin}/s/${share!.id}`;
+    expect(writeText).toHaveBeenCalledWith(url);
+    expect(
+      screen.getByRole('textbox', { name: /Anyone with this link/ }),
+    ).toHaveValue(url);
+    workspace.dispose();
+  });
+
+  it('shows an existing link when the design opens', async () => {
+    const { workspace } = await setupCloud(new FakeShareStore(), {
+      alreadyShared: true,
+    });
+
+    expect(
+      await screen.findByRole('region', { name: 'Share link' }),
+    ).toBeInTheDocument();
+    workspace.dispose();
+  });
+
+  it('stops sharing', async () => {
+    const { shares, record, workspace } = await setupCloud();
+    await userEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+    await screen.findByRole('region', { name: 'Share link' });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Stop sharing' }));
+
+    expect(
+      await screen.findByText('Sharing stopped. The link no longer works.'),
+    ).toBeInTheDocument();
+    expect(shares.shares.has(record.id)).toBe(false);
+    expect(
+      screen.queryByRole('region', { name: 'Share link' }),
+    ).not.toBeInTheDocument();
+    workspace.dispose();
+  });
+
+  it('falls back to manual copy when the clipboard refuses', async () => {
+    writeText.mockRejectedValueOnce(new Error('NotAllowedError'));
+    const { workspace } = await setupCloud();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+
+    expect(
+      await screen.findByText(
+        'Your link is ready. Copy it from the box below.',
+      ),
+    ).toBeInTheDocument();
+    workspace.dispose();
+  });
+
+  it('reports publish and stop failures without losing the link', async () => {
+    const { shares, workspace, services } = await setupCloud();
+    shares.failNext = new Error('storage down');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Couldn't create the share link",
+    );
+    expect(services.logLines.join()).toContain('share.publish_failed');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+    await screen.findByRole('region', { name: 'Share link' });
+    shares.failNext = new Error('denied');
+    await userEvent.click(screen.getByRole('button', { name: 'Stop sharing' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Couldn't stop sharing",
+    );
+    expect(
+      screen.getByRole('region', { name: 'Share link' }),
+    ).toBeInTheDocument();
+    workspace.dispose();
+  });
+
+  it('asks for a connection when offline', async () => {
+    const { shares, workspace } = await setupCloud();
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Connect to the internet',
+    );
+    expect(shares.shares.size).toBe(0);
+    online.mockRestore();
+    workspace.dispose();
   });
 });

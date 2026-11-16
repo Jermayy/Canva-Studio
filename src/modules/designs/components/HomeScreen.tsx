@@ -194,6 +194,16 @@ export function HomeScreen({
                         void run('delete', async () => {
                           await workspace.designs.remove(record.id);
                           workspace.sync?.requestSync();
+                          // The link dies with the design server-side; this
+                          // also removes its public image. Best effort.
+                          workspace.shares
+                            ?.unpublish(record.id)
+                            .catch((error: unknown) => {
+                              logger.warn('share.cleanup_failed', {
+                                designId: record.id,
+                                error: String(error),
+                              });
+                            });
                         });
                       }}
                     >
