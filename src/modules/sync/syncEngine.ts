@@ -1,7 +1,11 @@
 import type { AssetRepository } from '@/modules/designs/data/assetRepository';
 import type { DesignRecord } from '@/modules/designs/data/localDb';
 import type { LocalDesignRepository } from '@/modules/designs/data/localDesignRepository';
-import { safeParseDesignDocument } from '@/modules/editor/domain/designModel';
+import {
+  NewerSchemaVersionError,
+  safeParseDesignDocument,
+  upgradeDesignDocument,
+} from '@/modules/editor/domain/designModel';
 import { referencedAssetIds } from '@/modules/editor/domain/documentOps';
 import type {
   PullCursor,
@@ -15,7 +19,9 @@ export type SyncStatus =
   | { state: 'offline' }
   | { state: 'syncing' }
   | { state: 'idle'; lastSyncedAt: number; live: boolean }
-  | { state: 'error'; message: string };
+  | { state: 'error'; message: string }
+  /** The cloud has designs from a newer app version; reload to update. */
+  | { state: 'update-required' };
 
 export interface SyncEngineDeps {
   local: LocalDesignRepository;
@@ -184,6 +190,15 @@ export class SyncEngine {
         durationMs: this.now() - started,
       });
     } catch (error) {
+      if (error instanceof NewerSchemaVersionError) {
+        // Not a fault: another device runs a newer deploy. The cursor is
+        // not advanced, so the design is pulled again after a reload.
+        this.deps.logger.warn('sync.newer_schema_version', {
+          found: error.found,
+        });
+        this.setStatus({ state: 'update-required' });
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       this.deps.logger.error('sync.failed', { error: message });
       this.setStatus(
@@ -252,6 +267,11 @@ export class SyncEngine {
       localVersion: local.version,
       remoteVersion: remote?.version ?? null,
     });
+    if (remote && remote.deletedAt === null) {
+      // Throws before any copy is made if a newer app wrote the server
+      // copy; otherwise every retry would add another conflicted copy.
+      upgradeDesignDocument(remote.document);
+    }
 
     const sameContent =
       remote !== null &&

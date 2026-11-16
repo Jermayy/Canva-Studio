@@ -10,6 +10,7 @@ describe('SyncBadge', () => {
     [{ state: 'idle', lastSyncedAt: 0, live: true }, 'Synced · live'],
     [{ state: 'idle', lastSyncedAt: 0, live: false }, 'Synced'],
     [{ state: 'error', message: 'boom' }, 'Sync paused'],
+    [{ state: 'update-required' }, 'Update available'],
   ])('shows %j as "%s"', (status, label) => {
     render(<SyncBadge status={status} />);
 

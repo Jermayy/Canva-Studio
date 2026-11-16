@@ -43,6 +43,13 @@ function describe(status: SyncStatus | null): {
         tone: 'error',
         detail: `Changes are safe locally. Will retry automatically. (${status.message})`,
       };
+    case 'update-required':
+      return {
+        label: 'Update available',
+        tone: 'warning',
+        detail:
+          'A newer version of Canvas Studio saved some of your designs. Reload the page to update; your changes here are safe.',
+      };
   }
 }
 

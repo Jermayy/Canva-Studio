@@ -3,9 +3,14 @@ import { z } from 'zod';
 /**
  * The design document format.
  *
- * Every document loaded from disk or the cloud is parsed with
- * `designDocumentSchema`, so the editor can trust its shape. Bump
- * `schemaVersion` and add a migration when the format changes.
+ * Every document loaded from the cloud is upgraded to the current
+ * `schemaVersion` and then parsed with `designDocumentSchema`, so the
+ * editor can trust its shape. To change the format (ADR 0007):
+ *
+ * 1. Bump `DESIGN_SCHEMA_VERSION` and update the schema.
+ * 2. Add a pure migration from the previous version to `DOCUMENT_MIGRATIONS`.
+ * 3. Add a Dexie version in `localDb.ts` whose `upgrade()` runs
+ *    `upgradeDesignDocument` over stored records.
  */
 
 export const DESIGN_SCHEMA_VERSION = 1;
@@ -153,12 +158,77 @@ export function isShapeElement(
   );
 }
 
-export function parseDesignDocument(input: unknown): DesignDocument {
-  return designDocumentSchema.parse(input);
+/** A stored document in the shape of an older schema version. */
+export type RawDocument = Record<string, unknown>;
+
+/**
+ * Upgrades a document from version `n` to `n + 1`. Keyed by `n`.
+ * Migrations are pure and must not drop user content.
+ */
+export type DocumentMigration = (document: RawDocument) => RawDocument;
+
+/** Empty until the format first changes (current version is 1). */
+export const DOCUMENT_MIGRATIONS: Readonly<Record<number, DocumentMigration>> =
+  {};
+
+/** A newer app version wrote this document; this build can't read it. */
+export class NewerSchemaVersionError extends Error {
+  constructor(readonly found: number) {
+    super(
+      `Design uses schema version ${found}; this app supports up to ${DESIGN_SCHEMA_VERSION}`,
+    );
+    this.name = 'NewerSchemaVersionError';
+  }
 }
 
+function isRawDocument(input: unknown): input is RawDocument {
+  return typeof input === 'object' && input !== null && !Array.isArray(input);
+}
+
+/**
+ * Brings a stored document up to `currentVersion` by applying each
+ * migration in turn. Input that isn't a versioned object is returned as is
+ * so schema validation reports it.
+ *
+ * @throws NewerSchemaVersionError when the document is from a newer app.
+ */
+export function upgradeDesignDocument(
+  input: unknown,
+  migrations: Readonly<Record<number, DocumentMigration>> = DOCUMENT_MIGRATIONS,
+  currentVersion: number = DESIGN_SCHEMA_VERSION,
+): unknown {
+  if (!isRawDocument(input)) {
+    return input;
+  }
+  const found = input.schemaVersion;
+  if (typeof found !== 'number' || !Number.isInteger(found) || found < 1) {
+    return input;
+  }
+  if (found > currentVersion) {
+    throw new NewerSchemaVersionError(found);
+  }
+  let document = input;
+  for (let version = found; version < currentVersion; version += 1) {
+    const migrate = migrations[version];
+    if (!migrate) {
+      throw new Error(`No migration from schema version ${version}`);
+    }
+    document = { ...migrate(document), schemaVersion: version + 1 };
+  }
+  return document;
+}
+
+export function parseDesignDocument(input: unknown): DesignDocument {
+  return designDocumentSchema.parse(upgradeDesignDocument(input));
+}
+
+/**
+ * Upgrades and validates a document. Returns null when it is invalid;
+ * a document from a newer app version still throws, because skipping it
+ * would silently drop the user's design.
+ */
 export function safeParseDesignDocument(input: unknown): DesignDocument | null {
-  const result = designDocumentSchema.safeParse(input);
+  const result = designDocumentSchema.safeParse(upgradeDesignDocument(input));
   return result.success ? result.data : null;
 }
 

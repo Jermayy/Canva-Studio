@@ -188,6 +188,21 @@ describe('SyncEngine pull', () => {
     expect(logLines.join()).toContain('sync.invalid_remote_document');
   });
 
+  it('pauses with update-required on designs from a newer app version', async () => {
+    remote.serverWrite({
+      ...remoteWrite('future', 'Future'),
+      document: { ...buildDocument(), schemaVersion: 99 },
+    });
+
+    await engine.syncNow();
+
+    expect(engine.getStatus()).toEqual({ state: 'update-required' });
+    expect(await local.get('future')).toBeUndefined();
+    expect(logLines.join()).toContain('sync.newer_schema_version');
+    // The cursor stays put so the design is pulled again after a reload.
+    expect(await local.getMeta('pull-cursor')).toBeUndefined();
+  });
+
   it('downloads images referenced by pulled designs', async () => {
     const assetId = await sha256Hex(PNG);
     remote.assets.set(assetId, { bytes: PNG, mime: 'image/png' });
@@ -335,6 +350,25 @@ describe('SyncEngine conflicts', () => {
       'Poster (edited here) (conflicted copy)',
     ]);
     expect(logLines.join()).toContain('sync.conflict');
+  });
+
+  it('does not pile up conflicted copies when the server copy is from a newer app', async () => {
+    const created = await local.create('Poster', buildDocument());
+    await engine.syncNow();
+    remote.serverWrite({
+      ...remoteWrite(created.id, 'Poster (newer app)'),
+      document: { ...buildDocument(), schemaVersion: 99 },
+    });
+    await local.saveEdit(created.id, { title: 'Poster (edited here)' });
+
+    await engine.syncNow();
+    await engine.syncNow();
+
+    expect((await local.list()).map((record) => record.title)).toEqual([
+      'Poster (edited here)',
+    ]);
+    expect(await local.get(created.id)).toMatchObject({ dirty: 1 });
+    expect(engine.getStatus()).toEqual({ state: 'update-required' });
   });
 
   it('does not create a copy when both sides made the same change', async () => {

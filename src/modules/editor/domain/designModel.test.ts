@@ -1,8 +1,11 @@
 import {
+  DESIGN_SCHEMA_VERSION,
+  NewerSchemaVersionError,
   createBlankDocument,
   isShapeElement,
   parseDesignDocument,
   safeParseDesignDocument,
+  upgradeDesignDocument,
 } from '@/modules/editor/domain/designModel';
 import {
   ASSET_ID,
@@ -84,5 +87,71 @@ describe('designModel', () => {
   it('identifies shape elements', () => {
     expect(isShapeElement(buildRect())).toBe(true);
     expect(isShapeElement(buildText())).toBe(false);
+  });
+});
+
+describe('upgradeDesignDocument', () => {
+  // A pretend v1 -> v2 -> v3 history: v2 renamed `bg` to `background`,
+  // v3 added a `guides` list.
+  const migrations = {
+    1: ({ bg, ...rest }: Record<string, unknown>) => ({
+      ...rest,
+      background: bg,
+    }),
+    2: (document: Record<string, unknown>) => ({ ...document, guides: [] }),
+  };
+
+  it('applies each migration in order up to the current version', () => {
+    const upgraded = upgradeDesignDocument(
+      { schemaVersion: 1, bg: '#FFFFFF', elements: [] },
+      migrations,
+      3,
+    );
+
+    expect(upgraded).toEqual({
+      schemaVersion: 3,
+      background: '#FFFFFF',
+      elements: [],
+      guides: [],
+    });
+  });
+
+  it('leaves current documents untouched', () => {
+    const document = buildDocument();
+
+    expect(upgradeDesignDocument(document)).toBe(document);
+    expect(document.schemaVersion).toBe(DESIGN_SCHEMA_VERSION);
+  });
+
+  it('refuses documents from a newer app version', () => {
+    const newer = {
+      ...buildDocument(),
+      schemaVersion: DESIGN_SCHEMA_VERSION + 1,
+    };
+
+    expect(() => upgradeDesignDocument(newer)).toThrow(NewerSchemaVersionError);
+    // Not swallowed as "invalid": skipping it would drop the user's design.
+    expect(() => safeParseDesignDocument(newer)).toThrow(
+      NewerSchemaVersionError,
+    );
+  });
+
+  it('fails loudly when a migration step is missing', () => {
+    expect(() =>
+      upgradeDesignDocument({ schemaVersion: 1 }, { 2: (d) => d }, 3),
+    ).toThrow('No migration from schema version 1');
+  });
+
+  it('passes unversioned or malformed input through for schema validation', () => {
+    for (const input of [
+      null,
+      [],
+      'x',
+      { schemaVersion: 'one' },
+      { schemaVersion: 0 },
+    ]) {
+      expect(upgradeDesignDocument(input)).toBe(input);
+      expect(safeParseDesignDocument(input)).toBeNull();
+    }
   });
 });

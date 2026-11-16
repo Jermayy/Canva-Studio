@@ -6,7 +6,7 @@
 
 ## Context
 
-The desktop build had real costs for the people it was meant for: a ~270 MB unsigned download, Gatekeeper warnings, and no way to try it from a link. The project also needs to be easy to evaluate (a reviewer should reach a working editor in seconds), and share links (ADR 0007) need a public URL anyway.
+The desktop build had real costs for the people it was meant for: a ~270 MB unsigned download, Gatekeeper warnings, and no way to try it from a link. The project also needs to be easy to evaluate (a reviewer should reach a working editor in seconds), and share links (ADR 0008) need a public URL anyway.
 
 The renderer only depended on Electron through one typed API (`window.canvasStudio`: session storage, file save/share, app info). Editor, local database (IndexedDB via Dexie), sync and export encoding already ran in a browser.
 
