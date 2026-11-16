@@ -272,6 +272,16 @@ textarea {
   color: var(--color-danger);
 }
 
+/* Guest storage note */
+.guest-note {
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  font-size: 13px;
+  color: var(--color-text-muted);
+  background: var(--color-surface-alt);
+  border-bottom: 1px solid var(--color-border);
+}
+
 /* Share link */
 .share-bar {
   display: flex;

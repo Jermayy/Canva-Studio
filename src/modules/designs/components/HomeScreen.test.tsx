@@ -175,4 +175,37 @@ describe('HomeScreen', () => {
 
     expect(onSignOut).toHaveBeenCalled();
   });
+
+  it('warns guests that browser storage can be cleared', async () => {
+    const { onSignOut } = setup();
+
+    expect(screen.getByRole('note')).toHaveTextContent(
+      /saved in this browser only/,
+    );
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Sign in to back them up' }),
+    );
+    expect(onSignOut).toHaveBeenCalled();
+  });
+
+  it('asks the browser to keep local data when a design is created', async () => {
+    const persist = vi.fn(() => Promise.resolve(true));
+    Object.defineProperty(navigator, 'storage', {
+      value: { persist, persisted: () => Promise.resolve(false) },
+      configurable: true,
+    });
+    try {
+      const { services } = setup();
+      await userEvent.click(
+        screen.getByRole('button', { name: /Christmas party/ }),
+      );
+
+      await waitFor(() => {
+        expect(services.logLines.join()).toContain('"result":"persisted"');
+      });
+      expect(persist).toHaveBeenCalledOnce();
+    } finally {
+      Reflect.deleteProperty(navigator, 'storage');
+    }
+  });
 });

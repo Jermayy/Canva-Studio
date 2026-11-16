@@ -3,6 +3,7 @@ import { useLiveQuery, useSyncStatus } from '@/app/hooks';
 import { useServices, useWorkspace } from '@/app/services';
 import { DesignPreview } from '@/modules/designs/components/DesignPreview';
 import type { DesignRecord } from '@/modules/designs/data/localDb';
+import { requestPersistentStorage } from '@/modules/designs/data/storagePersistence';
 import { TemplateCard } from '@/modules/library/components/SidePanel';
 import {
   TEMPLATES,
@@ -59,6 +60,10 @@ export function HomeScreen({
 
   const createFrom = (template: Template) =>
     run('create', async () => {
+      // A user action: the right moment for a possible browser prompt.
+      void requestPersistentStorage().then((result) => {
+        logger.info('storage.persistence', { result });
+      });
       const name =
         template.category === 'Blank' ? 'Untitled design' : template.name;
       onOpen(await workspace.designs.create(name, template.build()));
@@ -97,6 +102,15 @@ export function HomeScreen({
           onDismissNotice();
         }}
       />
+      {workspace.kind === 'guest' && (
+        <p className="guest-note" role="note">
+          Your designs are saved in this browser only, and browsers can clear
+          site data (Safari does after 7 days without a visit).{' '}
+          <button type="button" className="link" onClick={onSignOut}>
+            Sign in to back them up
+          </button>
+        </p>
+      )}
       <main className="home-main">
         <section aria-labelledby="create-heading">
           <div className="section-heading">
