@@ -2,6 +2,9 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
+    // vite.config.mts imports ./build/csp.ts with its extension (Vite's
+    // native config loader requires it); type checking never emits.
+    "allowImportingTsExtensions": true,
     "lib": ["ES2023"],
     "types": ["node", "vitest/globals"]
   },

@@ -66,6 +66,7 @@ sequenceDiagram
 - **Hardened browser surface.** A build-time CSP (`script-src 'self'`, network and images limited to the configured Supabase host), plus HTTP headers from `vercel.json`: HSTS, `frame-ancestors 'none'`, nosniff, COOP and a restrictive Permissions-Policy. The session is in browser storage, so XSS is treated as the critical risk (ADR 0006).
 
 - **Public only by token.** Share links expose one PNG and title per shared design through a security-definer lookup by exact token; nothing public can be listed (ADR 0008).
+- **Split by route.** The entry point validates config and then loads either the public share page (~154 KB gzipped in total) or the editor (+287 KB: Konva, jsPDF, sync). People opening a share link never download the editor.
 - **Authorisation is tested.** RLS policies and SQL functions have tests in `supabase/tests/`, run on Postgres in CI.
 
 See `docs/adr/` for the reasoning behind each choice.

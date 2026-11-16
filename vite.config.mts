@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import react from '@vitejs/plugin-react';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
-import { buildCsp, injectCsp } from './build/csp';
+import { buildCsp, injectCsp } from './build/csp.ts';
 
 const { version } = JSON.parse(
   readFileSync(resolve(import.meta.dirname, 'package.json'), 'utf8'),

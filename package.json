@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "Local-first web app for designing event posters, with cloud sync and share links.",
   "private": true,
+  "type": "module",
   "author": "Jeremy",
   "license": "UNLICENSED",
   "scripts": {

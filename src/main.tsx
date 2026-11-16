@@ -1,24 +1,14 @@
 import '@/styles.css';
-import { App } from '@/app/App';
 import { ErrorBoundary } from '@/app/components/ErrorBoundary';
 import { parseConfig } from '@/app/config';
-import { AuthService } from '@/modules/auth/authService';
 import { createSupabase } from '@/modules/auth/supabaseClient';
-import { ExportService } from '@/modules/export/exportService';
 import {
   browserFileEnv,
   createBrowserFileDelivery,
 } from '@/modules/export/fileDelivery';
-import { SharedDesignPage } from '@/modules/share/components/SharedDesignPage';
-import { isSharePath, parseShareId } from '@/modules/share/domain/shareLink';
-import { downloadSharedImage } from '@/modules/share/downloadSharedImage';
-import {
-  SupabaseShareStore,
-  fetchSharedDesign,
-} from '@/modules/share/supabaseShareStore';
-import { SupabaseRemoteStore } from '@/modules/sync/supabaseRemoteStore';
+import { isSharePath } from '@/modules/share/domain/shareLink';
 import { createLogger } from '@/shared/logger';
-import { StrictMode } from 'react';
+import { StrictMode, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 const logger = createLogger({
@@ -43,47 +33,15 @@ if (!rootElement) {
 }
 const root = createRoot(rootElement);
 
-try {
-  // Fails fast on a half-configured or unsafe build.
-  const config = parseConfig(import.meta.env);
-  const supabase = config.supabase
-    ? createSupabase(config.supabase, window.localStorage)
-    : null;
-  const auth = supabase ? new AuthService(supabase, logger) : null;
-  const files = createBrowserFileDelivery(browserFileEnv());
-  const { pathname } = window.location;
-
+function renderApp(content: ReactNode): void {
   root.render(
     <StrictMode>
-      <ErrorBoundary logger={logger}>
-        {isSharePath(pathname) ? (
-          <SharedDesignPage
-            shareId={parseShareId(pathname)}
-            loadShare={
-              supabase ? (id) => fetchSharedDesign(supabase, id) : null
-            }
-            download={(view) => downloadSharedImage(view, { fetch, files })}
-            logger={logger}
-          />
-        ) : (
-          <App
-            services={{ logger, exporter: new ExportService(files) }}
-            auth={auth}
-            createRemote={(user) => {
-              if (!supabase) {
-                throw new Error('Cloud sync is not configured');
-              }
-              return new SupabaseRemoteStore(supabase, user.id);
-            }}
-            {...(supabase
-              ? { createShares: () => new SupabaseShareStore(supabase) }
-              : {})}
-          />
-        )}
-      </ErrorBoundary>
+      <ErrorBoundary logger={logger}>{content}</ErrorBoundary>
     </StrictMode>,
   );
-} catch (error) {
+}
+
+function renderFatal(error: unknown): void {
   logger.error('app.startup_failed', { error: String(error) });
   root.render(
     <div className="fatal-screen" role="alert">
@@ -92,3 +50,35 @@ try {
     </div>,
   );
 }
+
+/**
+ * Validates config, then loads only the code for this URL: the public
+ * share page or the editor app, each its own chunk.
+ */
+async function start(): Promise<void> {
+  // Fails fast on a half-configured or unsafe build.
+  const config = parseConfig(import.meta.env);
+  const supabase = config.supabase
+    ? createSupabase(config.supabase, window.localStorage)
+    : null;
+  const files = createBrowserFileDelivery(browserFileEnv());
+  const { pathname } = window.location;
+
+  if (isSharePath(pathname)) {
+    const { SharedDesignRoot } =
+      await import('@/modules/share/components/SharedDesignRoot');
+    renderApp(
+      <SharedDesignRoot
+        pathname={pathname}
+        supabase={supabase}
+        logger={logger}
+        files={files}
+      />,
+    );
+    return;
+  }
+  const { EditorRoot } = await import('@/app/EditorRoot');
+  renderApp(<EditorRoot supabase={supabase} logger={logger} files={files} />);
+}
+
+start().catch(renderFatal);
