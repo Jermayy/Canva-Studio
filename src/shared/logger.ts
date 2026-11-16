@@ -1,5 +1,5 @@
 /**
- * Minimal structured logger shared by main and renderer.
+ * Minimal structured logger (structured JSON, secrets redacted).
  *
  * Emits one JSON object per line so logs are machine-readable. Context keys
  * that look like secrets are redacted before writing.

@@ -3,9 +3,8 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vitest/config';
 
 const alias = {
-  '@renderer': resolve(import.meta.dirname, 'src/renderer/src'),
-  '@shared': resolve(import.meta.dirname, 'src/shared'),
-  '@main': resolve(import.meta.dirname, 'src/main'),
+  '@': resolve(import.meta.dirname, 'src'),
+  '@build': resolve(import.meta.dirname, 'build'),
 };
 
 export default defineConfig({
@@ -19,39 +18,40 @@ export default defineConfig({
         test: {
           name: 'node',
           environment: 'node',
-          include: ['src/main/**/*.test.ts', 'src/shared/**/*.test.ts'],
+          include: ['build/**/*.test.ts', 'src/shared/**/*.test.ts'],
         },
       },
       {
         extends: true,
         plugins: [react()],
         test: {
-          name: 'renderer',
+          name: 'web',
           environment: 'jsdom',
-          include: ['src/renderer/src/**/*.test.{ts,tsx}'],
-          setupFiles: ['src/renderer/src/test/setup.ts'],
+          include: ['src/**/*.test.{ts,tsx}'],
+          exclude: ['src/shared/**'],
+          setupFiles: ['src/test/setup.ts'],
         },
       },
     ],
     coverage: {
       provider: 'v8',
-      include: ['src/**/*.{ts,tsx}'],
+      include: ['src/**/*.{ts,tsx}', 'build/**/*.ts'],
       exclude: [
         'src/**/*.test.{ts,tsx}',
+        'build/**/*.test.ts',
         'src/**/*.d.ts',
-        'src/renderer/src/test/**',
-        'src/renderer/src/main.tsx',
-        'src/main/index.ts',
-        'src/preload/index.ts',
+        'src/test/**',
+        'src/main.tsx',
       ],
       thresholds: {
         // State/business logic must stay above 90%, UI above 70%.
-        'src/renderer/src/modules/**/domain/**': { lines: 90, branches: 85 },
-        'src/renderer/src/modules/**/state/**': { lines: 90, branches: 85 },
-        'src/renderer/src/modules/**/data/**': { lines: 90, branches: 80 },
-        'src/renderer/src/modules/sync/**': { lines: 90, branches: 80 },
-        'src/main/**': { lines: 90 },
-        'src/renderer/src/modules/**/components/**': { lines: 70 },
+        'src/modules/**/domain/**': { lines: 90, branches: 85 },
+        'src/modules/**/state/**': { lines: 90, branches: 85 },
+        'src/modules/**/data/**': { lines: 90, branches: 80 },
+        'src/modules/sync/**': { lines: 90, branches: 80 },
+        'src/modules/export/fileDelivery.ts': { lines: 90, branches: 85 },
+        'build/**': { lines: 90 },
+        'src/modules/**/components/**': { lines: 70 },
       },
     },
   },

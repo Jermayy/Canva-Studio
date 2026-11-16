@@ -4,27 +4,29 @@
 
 ```mermaid
 flowchart LR
-  subgraph Desktop["Electron app (per device)"]
-    R["Renderer (React, sandboxed)<br/>editor · library · home · auth"]
-    P["Preload<br/>window.canvasStudio"]
-    M["Main process<br/>IPC · file save/share · window security"]
+  subgraph Browser["Browser tab (per device)"]
+    UI["React SPA<br/>editor · library · home · auth"]
+    FD["FileDelivery<br/>download · Web Share API"]
     IDB[("IndexedDB<br/>one DB per user")]
-    KC[("OS keychain<br/>encrypted session")]
-    R -- "typed IPC (invoke)" --> P --> M
-    R --> IDB
-    M --> KC
-    M --> OS["Save dialog · Share sheet"]
+    LS[("localStorage<br/>Supabase session (ADR 0006)")]
+    UI --> FD
+    UI --> IDB
+    UI --> LS
   end
-  subgraph Supabase
+  subgraph Vercel
+    CDN["Static hosting<br/>security headers · SPA rewrites"]
+  end
+  subgraph Supabase["Supabase (ap-southeast-2, Sydney)"]
     AUTH["Auth"]
     PG[("Postgres<br/>designs + RLS")]
     RT["Realtime"]
     ST[("Storage<br/>design-assets")]
   end
-  R -- "HTTPS (15s timeout)" --> AUTH
-  R -- "HTTPS" --> PG
-  R -- "WSS" --> RT
-  R -- "HTTPS" --> ST
+  CDN -- "HTML/JS/CSS" --> UI
+  UI -- "HTTPS (15s timeout)" --> AUTH
+  UI -- "HTTPS" --> PG
+  UI -- "WSS" --> RT
+  UI -- "HTTPS" --> ST
   PG -. "change events" .-> RT
 ```
 
@@ -53,10 +55,10 @@ sequenceDiagram
 
 ## Key properties
 
-- **Offline-first.** The UI only ever talks to the local database. Sync is a background process that can fail without affecting editing.
+- **Local-first.** The UI only ever talks to the local database. Sync is a background process that can fail without affecting editing.
 - **Per-user isolation.** On the device, each account gets its own IndexedDB database (`canvas-studio-<userId>`). In the cloud, RLS policies restrict every row and storage object to `auth.uid()`.
 - **No lost work.** Optimistic concurrency (`version`) detects concurrent edits; the losing side becomes a separate design instead of being overwritten. Deletions are tombstones, so they propagate too.
-- **Validated boundaries.** IPC payloads (zod plus file signatures), cloud rows (zod), dropped drag payloads (zod), uploads (MIME allow-list, signatures, size, SHA-256 integrity on download) and new or patched elements are all validated.
-- **Hardened Electron.** Context isolation, sandbox, no Node in the renderer, IPC sender origin checks, navigation and new windows blocked (https opens in the browser), and a strict CSP limiting network access to the configured Supabase host.
+- **Validated boundaries.** Exported files (zod plus file signatures), cloud rows (zod), dropped drag payloads (zod), uploads (MIME allow-list, signatures, size, SHA-256 integrity on download) and new or patched elements are all validated.
+- **Hardened browser surface.** A build-time CSP (`script-src 'self'`, network and images limited to the configured Supabase host), plus HTTP headers from `vercel.json`: HSTS, `frame-ancestors 'none'`, nosniff, COOP and a restrictive Permissions-Policy. The session is in browser storage, so XSS is treated as the critical risk (ADR 0006).
 
 See `docs/adr/` for the reasoning behind each choice.

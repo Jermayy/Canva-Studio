@@ -46,4 +46,4 @@ jobs:
         run: npm run test:coverage
 
       - name: Build
-        run: npx electron-vite build
+        run: npm run build

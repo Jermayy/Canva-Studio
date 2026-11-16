@@ -5,46 +5,46 @@ Follows Jem's engineering playbook: @~/.claude/playbook/PLAYBOOK.md
 
 ## What this is
 
-Offline-first Electron desktop app for designing event posters (birthday, Christmas…) from templates and drag-and-drop assets, with PDF/PNG export, native sharing and Supabase cloud sync. Stage: MVP.
+Local-first web app (static SPA on Vercel) for designing event posters (birthday, Christmas…) from templates and drag-and-drop assets, with PDF/PNG export, Web Share, share links and Supabase cloud sync. Stage: MVP. Migrated from Electron (ADR 0005).
 
 ## Stack
 
-- Runtime: Node 24 (pinned in `.nvmrc` and `package.json#volta`), Electron 45
-- Frameworks: React 19, TypeScript 6 (TS 7 isn't supported by typescript-eslint yet), electron-vite 6 / Vite 8, Konva + react-konva, zustand, zod 4
+- Runtime: Node 24 for tooling (pinned in `.nvmrc` and `package.json#volta`); runs in modern browsers
+- Frameworks: React 19, TypeScript 6 (TS 7 isn't supported by typescript-eslint yet), Vite 8, Konva + react-konva, zustand, zod 4
 - Storage: IndexedDB through Dexie (local, one DB per user) + Supabase Postgres/Storage (cloud)
-- Auth: Supabase Auth (email/password); session encrypted with OS keychain via `safeStorage`
-- Packaging: electron-builder (`electron-builder.yml`)
+- Auth: Supabase Auth (email/password); session in localStorage under `canvas-studio-auth` (ADR 0006)
+- Hosting: Vercel (`vercel.json`: headers, rewrites, caching); Supabase in Sydney (ap-southeast-2)
 
 ## Commands
 
 ```bash
 npm install                  # deps (Node >= 24)
-npm run dev                  # app with hot reload
+npm run dev                  # http://localhost:5173 (no .env needed: local-only)
 npm test                     # all tests (node + jsdom projects)
 npm run test:coverage        # with coverage thresholds
 npm run lint                 # ESLint (type-aware, strict)
 npm run format:check         # Prettier
 npm run typecheck            # tsc for node + web projects
 npm run check                # everything above; run before saying "done"
-npx electron-vite build      # production bundles in out/
-npm run dist:mac             # packaged app in dist/
+npm run build                # typecheck + production bundle in dist/
+npm run preview              # serve dist/ locally
 ```
 
 DB migration: apply `supabase/migrations/*.sql` via `supabase db push` or the dashboard SQL editor.
 
 ## Structure
 
-- `src/main` — main process; modules take Electron as injected deps so they're unit-testable. `index.ts` is wiring only.
-- `src/preload` — sandboxed; may import **only** `electron` and type-only/dependency-free modules (deps are externalized and can't load in the sandbox).
-- `src/shared` — IPC contract (`ipc.ts`) and logger.
-- `src/renderer/src/modules/<feature>/{domain,data,state,hooks,components}` — domain is pure and framework-free; components never call Supabase directly.
-- `src/renderer/src/test` — factories, fake remote store, react-konva DOM mock, render helpers.
+- `src/main.tsx` — wiring only (config, Supabase client, browser adapters).
+- `src/modules/<feature>/{domain,data,state,hooks,components}` — domain is pure and framework-free; components never call Supabase directly.
+- Browser APIs (downloads, Web Share, storage, locks) are injected through small adapters (e.g. `export/fileDelivery.ts`) so they're unit-testable.
+- `src/shared` — logger. `build/` — build-time helpers (CSP) used by `vite.config.mts`.
+- `src/test` — factories, fake remote store, react-konva DOM mock, render helpers.
 
 ## Conventions specific to this project
 
 Adapted from the portable steering kit the project was started with:
 
-- Absolute imports only (`@renderer/…`, `@shared/…`, `@main/…`); relative imports fail lint.
+- Absolute imports only (`@/…`, `@build/…`); relative imports fail lint (config files excepted).
 - Every `if` uses braces (`curly: all`). No non-null assertions in source (allowed in tests after an expectation).
 - Every document entering the editor or arriving from the cloud is parsed with zod (`designDocumentSchema`). Patches and new elements are re-validated in `documentOps`.
 - Components are functions, never stored in variables; extract a component instead of a `renderX()` helper. Non-component helpers live in non-`.tsx` files (Fast Refresh rule).
@@ -55,13 +55,12 @@ Adapted from the portable steering kit the project was started with:
 
 ## Deviations from the playbook
 
-- "MUST NOT store tokens in localStorage": met. Auth tokens go to the main process and are encrypted with the OS keychain. `localStorage` only holds the non-sensitive "offline guest" flag.
+- "MUST NOT store tokens in localStorage": **deviation**. A static SPA can't set HttpOnly cookies; the Supabase session is in localStorage, mitigated by a strict CSP and a lint ban on raw HTML injection. Threat model and revisit triggers in ADR 0006.
 - No server API of our own: Supabase PostgREST + RLS is the API (ADR 0002). Health endpoints, rate limiting and auth throttling come from Supabase.
 - Error tracker not yet integrated (open playbook question on vendor).
 
 ## Gotchas
 
-- If Electron behaves like plain Node (`app` is undefined), the shell has `ELECTRON_RUN_AS_NODE=1` set. VS Code's extension host does this. Run `env -u ELECTRON_RUN_AS_NODE npm run dev`.
 - jsdom lacks canvas, DragEvent and object URLs: tests mock react-konva globally (`test/reactKonvaMock.tsx`), stub `URL.createObjectURL` in `test/setup.ts`, and set drop coordinates with `createEvent` + `defineProperties`.
 - Zod 4 runs `.refine` even after a prior check fails; guard inputs inside refinements.
 - With fake timers in sync tests, fake only `setTimeout/setInterval` (fake-indexeddb needs real `setImmediate`).
@@ -69,4 +68,4 @@ Adapted from the portable steering kit the project was started with:
 
 ## Sensitive areas
 
-- `src/main/secureStore.ts`, `src/main/ipcHandlers.ts` (sender checks, input validation), `src/renderer/src/modules/auth/*`, `supabase/migrations/*` (RLS policies, trigger). Changes here need a security review (`/security-review`).
+- `build/csp.ts`, `vercel.json` (security headers), `src/modules/auth/*`, `src/modules/export/fileDelivery.ts` (export validation), `supabase/migrations/*` (RLS policies, triggers, security-definer functions). Changes here need a security review (`/security-review`).

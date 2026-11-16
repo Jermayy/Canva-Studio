@@ -6,10 +6,10 @@
     "types": ["node", "vitest/globals"]
   },
   "include": [
-    "electron.vite.config.mts",
+    "vite.config.mts",
     "vitest.config.mts",
-    "src/main/**/*",
-    "src/preload/**/*",
-    "src/shared/**/*"
+    "playwright.config.ts",
+    "build/**/*",
+    "e2e/**/*"
   ]
 }

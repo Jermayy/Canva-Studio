@@ -1,6 +1,6 @@
 # 0001 · Electron + React + Konva desktop stack
 
-- **Status:** Accepted
+- **Status:** Superseded by [0005](0005-web-app-on-vercel.md)
 - **Date:** 2026-11-10
 
 ## Context
