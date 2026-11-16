@@ -44,8 +44,14 @@ export async function saveCurrentDesign(deps: AutosaveDeps): Promise<void> {
 }
 
 /**
- * Saves shortly after each edit and once more when the editor unmounts,
- * so closing the design or the app never loses the last change.
+ * Saves shortly after each edit, when the tab is hidden or closed, and
+ * once more when the editor unmounts, so the last change isn't lost.
+ *
+ * Browsers often unload a page before an async IndexedDB write started in
+ * `beforeunload` finishes, so: flush earlier on `visibilitychange`/`pagehide`
+ * (the reliable events, especially on mobile), and if edits are still
+ * unsaved at `beforeunload`, ask the browser to confirm leaving, which
+ * gives the write time to complete.
  */
 export function useAutosave(deps: AutosaveDeps): void {
   const { designs, sync, logger } = deps;
@@ -67,10 +73,26 @@ export function useAutosave(deps: AutosaveDeps): void {
     const flush = () => {
       void saveCurrentDesign(current);
     };
-    window.addEventListener('beforeunload', flush);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        flush();
+      }
+    };
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!selectHasUnsavedChanges(editorStore.getState())) {
+        return;
+      }
+      flush();
+      event.preventDefault();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', flush);
+    window.addEventListener('beforeunload', onBeforeUnload);
     return () => {
       unsubscribe();
-      window.removeEventListener('beforeunload', flush);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', flush);
+      window.removeEventListener('beforeunload', onBeforeUnload);
       if (timer) {
         clearTimeout(timer);
       }

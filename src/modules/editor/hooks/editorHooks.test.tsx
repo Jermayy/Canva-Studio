@@ -123,7 +123,7 @@ describe('useAutosave', () => {
     });
   });
 
-  it('flushes when the window is closing', async () => {
+  it('flushes and asks to confirm leaving while changes are unsaved', async () => {
     const record = await openDesign();
     renderHook(() => {
       useAutosave({ designs, sync: null, logger });
@@ -132,11 +132,66 @@ describe('useAutosave', () => {
     act(() => {
       editorStore.getState().setTitle('Closing');
     });
-    window.dispatchEvent(new Event('beforeunload'));
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
 
+    expect(event.defaultPrevented).toBe(true);
     await waitFor(async () => {
       expect((await designs.get(record.id))?.title).toBe('Closing');
     });
+  });
+
+  it('lets the page close without a prompt once everything is saved', async () => {
+    await openDesign();
+    renderHook(() => {
+      useAutosave({ designs, sync: null, logger });
+    });
+
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it.each([
+    ['the tab is hidden', 'visibilitychange'],
+    ['the page is hidden or closed', 'pagehide'],
+  ])('flushes when %s', async (_label, eventName) => {
+    const record = await openDesign();
+    renderHook(() => {
+      useAutosave({ designs, sync: null, logger });
+    });
+    const visibility = vi
+      .spyOn(document, 'visibilityState', 'get')
+      .mockReturnValue('hidden');
+
+    act(() => {
+      editorStore.getState().setTitle(`Saved on ${eventName}`);
+    });
+    const target = eventName === 'pagehide' ? window : document;
+    target.dispatchEvent(new Event(eventName));
+
+    await waitFor(async () => {
+      expect((await designs.get(record.id))?.title).toBe(
+        `Saved on ${eventName}`,
+      );
+    });
+    visibility.mockRestore();
+  });
+
+  it('ignores the tab becoming visible again', async () => {
+    const record = await openDesign();
+    renderHook(() => {
+      useAutosave({ designs, sync: null, logger });
+    });
+
+    act(() => {
+      editorStore.getState().setTitle('Not yet');
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    // jsdom reports "visible": no save before the debounce fires.
+    expect((await designs.get(record.id))?.title).not.toBe('Not yet');
   });
 });
 
