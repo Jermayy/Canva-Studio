@@ -121,6 +121,35 @@ export class AuthService {
     }
   }
 
+  /**
+   * Re-checks the signed-in user's password before a destructive action,
+   * so an unattended signed-in browser can't be used to delete the
+   * account. (It doesn't stop script with the session: see ADR 0006.)
+   */
+  async verifyPassword(password: string): Promise<AuthResult> {
+    const user = await this.currentUser();
+    if (!user) {
+      return { ok: false, message: 'Your session has ended. Sign in again.' };
+    }
+    return this.signIn({ email: user.email, password });
+  }
+
+  /**
+   * Deletes the signed-in user server-side (designs cascade) and clears the
+   * local session. The user's storage files must already be deleted; the
+   * server refuses otherwise.
+   */
+  async deleteAccount(): Promise<void> {
+    const { error } = await this.client.rpc('delete_my_account');
+    if (error) {
+      this.logger.error('auth.delete_account_failed', { error: error.message });
+      throw new Error(`delete account failed: ${error.message}`);
+    }
+    this.logger.info('auth.account_deleted');
+    // The server-side user is gone, so only the local session remains.
+    await this.client.auth.signOut({ scope: 'local' });
+  }
+
   onSignedOut(listener: () => void): () => void {
     const { data } = this.client.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT') {

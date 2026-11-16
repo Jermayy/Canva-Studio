@@ -9,10 +9,18 @@ import {
   type Workspace,
   type WorkspaceSession,
 } from '@/app/workspace';
+import { DeleteAccountDialog } from '@/modules/account/components/DeleteAccountDialog';
+import {
+  deleteAccount,
+  type DeleteAccountResult,
+} from '@/modules/account/deleteAccount';
 import type { AuthService, AuthUser } from '@/modules/auth/authService';
 import { AuthScreen } from '@/modules/auth/components/AuthScreen';
 import { HomeScreen } from '@/modules/designs/components/HomeScreen';
-import type { DesignRecord } from '@/modules/designs/data/localDb';
+import {
+  deleteWorkspaceDb,
+  type DesignRecord,
+} from '@/modules/designs/data/localDb';
 import { EditorScreen } from '@/modules/editor/components/EditorScreen';
 import { editorStore } from '@/modules/editor/state/editorStore';
 import type { RemoteDesignStore } from '@/modules/sync/remoteDesignStore';
@@ -60,6 +68,8 @@ export function App({
   const [screen, setScreen] = useState<Screen>('loading');
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
+  const [deletingAccount, setDeletingAccount] = useState(false);
   // The live workspace, so it can be disposed exactly once on switch.
   const workspaceRef = useRef<Workspace | null>(null);
 
@@ -149,6 +159,43 @@ export function App({
     setScreen('auth');
   };
 
+  const confirmDeleteAccount = async (
+    password: string,
+  ): Promise<DeleteAccountResult> => {
+    const current = workspaceRef.current;
+    if (!auth || current?.kind !== 'cloud' || !current.remote) {
+      return { ok: false, message: 'Sign in to delete your account.' };
+    }
+    const workspaceId = current.id;
+    const result = await deleteAccount(
+      {
+        auth,
+        remote: current.remote,
+        isOnline: browserConnectivity.isOnline,
+        logger: services.logger,
+        deleteLocalData: async () => {
+          // Close the database before deleting it.
+          activate(null);
+          await deleteWorkspaceDb(workspaceId);
+        },
+      },
+      password,
+    );
+    if (result.ok) {
+      editorStore.getState().close();
+      writeGuestPreference(false);
+      activate(null);
+      setDeletingAccount(false);
+      setAuthNotice(
+        result.localDataRemains
+          ? 'Your account was deleted. Some data may remain in this browser; clear site data to remove it.'
+          : 'Your account and all its data have been deleted.',
+      );
+      setScreen('auth');
+    }
+    return result;
+  };
+
   const openDesign = (record: DesignRecord) => {
     editorStore.getState().open(record);
     setScreen('editor');
@@ -173,8 +220,15 @@ export function App({
       {screen === 'auth' && (
         <AuthScreen
           auth={auth}
-          onSignedIn={startCloud}
-          onContinueOffline={startGuest}
+          onSignedIn={(user) => {
+            setAuthNotice(null);
+            startCloud(user);
+          }}
+          onContinueOffline={() => {
+            setAuthNotice(null);
+            startGuest();
+          }}
+          notice={authNotice}
         />
       )}
       {workspace && (screen === 'home' || screen === 'editor') && (
@@ -185,6 +239,13 @@ export function App({
               onSignOut={() => {
                 void signOut();
               }}
+              onDeleteAccount={
+                auth
+                  ? () => {
+                      setDeletingAccount(true);
+                    }
+                  : undefined
+              }
               notice={notice}
               onDismissNotice={() => {
                 setNotice(null);
@@ -193,6 +254,15 @@ export function App({
           )}
           {screen === 'editor' && <EditorScreen onClose={closeEditor} />}
         </WorkspaceContext.Provider>
+      )}
+      {deletingAccount && workspace?.email && (
+        <DeleteAccountDialog
+          email={workspace.email}
+          onCancel={() => {
+            setDeletingAccount(false);
+          }}
+          onConfirm={confirmDeleteAccount}
+        />
       )}
     </ServicesContext.Provider>
   );

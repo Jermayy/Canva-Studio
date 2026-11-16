@@ -217,3 +217,67 @@ describe('AuthService.signOut and events', () => {
     expect(unsubscribe).toHaveBeenCalled();
   });
 });
+
+describe('AuthService.verifyPassword', () => {
+  it('re-authenticates the signed-in user with the given password', async () => {
+    const signInWithPassword = vi.fn(() =>
+      Promise.resolve({ data: { user: USER }, error: null }),
+    );
+    const { service } = setup({
+      getSession: () =>
+        Promise.resolve({ data: { session: { user: USER } }, error: null }),
+      signInWithPassword,
+    });
+
+    await expect(service.verifyPassword('correct-horse')).resolves.toEqual({
+      ok: true,
+      user: USER,
+    });
+    expect(signInWithPassword).toHaveBeenCalledWith(VALID);
+  });
+
+  it('fails without a session', async () => {
+    const { service } = setup({
+      getSession: () =>
+        Promise.resolve({ data: { session: null }, error: null }),
+    });
+
+    await expect(service.verifyPassword('x')).resolves.toMatchObject({
+      ok: false,
+      message: expect.stringContaining('session has ended'),
+    });
+  });
+});
+
+describe('AuthService.deleteAccount', () => {
+  function withRpc(error: { message: string } | null) {
+    const signOut = vi.fn(() => Promise.resolve({ error: null }));
+    const rpc = vi.fn(() => Promise.resolve({ error }));
+    const lines: string[] = [];
+    const service = new AuthService(
+      { auth: { signOut }, rpc } as unknown as SupabaseClient,
+      createLogger({ service: 't', sink: (_l, line) => lines.push(line) }),
+    );
+    return { service, rpc, signOut, lines };
+  }
+
+  it('calls delete_my_account and clears the local session', async () => {
+    const { service, rpc, signOut, lines } = withRpc(null);
+
+    await service.deleteAccount();
+
+    expect(rpc).toHaveBeenCalledWith('delete_my_account');
+    expect(signOut).toHaveBeenCalledWith({ scope: 'local' });
+    expect(lines.join()).toContain('auth.account_deleted');
+  });
+
+  it('throws and keeps the session when the server refuses', async () => {
+    const { service, signOut, lines } = withRpc({
+      message: 'delete your files before deleting the account',
+    });
+
+    await expect(service.deleteAccount()).rejects.toThrow('delete your files');
+    expect(signOut).not.toHaveBeenCalled();
+    expect(lines.join()).toContain('auth.delete_account_failed');
+  });
+});

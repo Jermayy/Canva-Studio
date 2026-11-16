@@ -50,6 +50,7 @@ export default defineConfig({
         'src/modules/**/data/**': { lines: 90, branches: 80 },
         'src/modules/sync/**': { lines: 90, branches: 80 },
         'src/modules/export/fileDelivery.ts': { lines: 90, branches: 85 },
+        'src/modules/account/*.ts': { lines: 90, branches: 85 },
         'build/**': { lines: 90 },
         'src/modules/**/components/**': { lines: 70 },
       },

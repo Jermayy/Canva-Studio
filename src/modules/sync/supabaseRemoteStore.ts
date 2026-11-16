@@ -13,6 +13,13 @@ import { z } from 'zod';
 
 export const DESIGNS_TABLE = 'designs';
 export const ASSETS_BUCKET = 'design-assets';
+/** Every bucket that keeps files under "<user id>/" (account deletion). */
+export const USER_FILE_BUCKETS = [ASSETS_BUCKET] as const;
+const LIST_PAGE_SIZE = 100;
+/** Stops a misbehaving list/remove pair from looping forever. */
+const MAX_DELETE_ROUNDS = 1_000;
+
+const storageListSchema = z.array(z.object({ name: z.string().min(1) }));
 
 const DESIGN_COLUMNS =
   'id, title, document, version, client_updated_at, updated_at, created_at, deleted_at';
@@ -187,6 +194,37 @@ export class SupabaseRemoteStore implements RemoteDesignStore {
       throw toError('download asset failed', error);
     }
     return { bytes: await data.arrayBuffer(), mime: data.type };
+  }
+
+  async deleteAllFiles(): Promise<number> {
+    let deleted = 0;
+    for (const bucketName of USER_FILE_BUCKETS) {
+      const bucket = this.client.storage.from(bucketName);
+      for (let round = 0; ; round += 1) {
+        if (round >= MAX_DELETE_ROUNDS) {
+          throw new Error(`delete files failed: ${bucketName} never emptied`);
+        }
+        // Always list from the start: removed files drop out of the listing.
+        const { data, error } = await bucket.list(this.userId, {
+          limit: LIST_PAGE_SIZE,
+        });
+        if (error) {
+          throw toError('list files failed', error);
+        }
+        const paths = storageListSchema
+          .parse(data)
+          .map((file) => `${this.userId}/${file.name}`);
+        if (paths.length === 0) {
+          break;
+        }
+        const { error: removeError } = await bucket.remove(paths);
+        if (removeError) {
+          throw toError('delete files failed', removeError);
+        }
+        deleted += paths.length;
+      }
+    }
+    return deleted;
   }
 
   subscribe(

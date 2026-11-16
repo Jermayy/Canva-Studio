@@ -17,6 +17,14 @@ function fakeAuth(currentUser: AuthUser | null = null) {
     signIn: vi.fn(() => Promise.resolve({ ok: true as const, user: USER })),
     signUp: vi.fn(),
     signOut: vi.fn(() => Promise.resolve()),
+    verifyPassword: vi.fn(() =>
+      Promise.resolve({ ok: true as const, user: USER }),
+    ),
+    deleteAccount: vi.fn(() => {
+      // Like Supabase: clearing the session emits SIGNED_OUT.
+      signedOut();
+      return Promise.resolve();
+    }),
     onSignedOut: vi.fn((listener: () => void) => {
       signedOut = listener;
       return () => undefined;
@@ -86,6 +94,66 @@ describe('App', () => {
     expect(
       await screen.findByRole('heading', { name: 'Sign in' }),
     ).toBeInTheDocument();
+  });
+
+  it('deletes the account and returns to sign-in with a confirmation', async () => {
+    const { auth } = fakeAuth(USER);
+    renderApp(auth);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Delete account' }),
+    );
+    await userEvent.type(
+      screen.getByLabelText('Enter your password to confirm'),
+      'long-password{Enter}',
+    );
+
+    expect(
+      await screen.findByText(
+        'Your account and all its data have been deleted.',
+      ),
+    ).toBeInTheDocument();
+    expect(auth.verifyPassword).toHaveBeenCalledWith('long-password');
+    expect(auth.deleteAccount).toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'Sign in' }),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps the dialog open and the account when deletion fails', async () => {
+    const { auth } = fakeAuth(USER);
+    auth.verifyPassword.mockResolvedValueOnce({
+      ok: false,
+      message: 'Email or password is incorrect.',
+    } as never);
+    renderApp(auth);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Delete account' }),
+    );
+    await userEvent.type(
+      screen.getByLabelText('Enter your password to confirm'),
+      'wrong-password{Enter}',
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('incorrect');
+    expect(auth.deleteAccount).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText('sam@example.com')).toBeInTheDocument();
+  });
+
+  it('does not offer account deletion to guests', async () => {
+    renderApp(fakeAuth().auth);
+    await userEvent.click(
+      await screen.findByRole('button', { name: /Continue offline/ }),
+    );
+
+    expect(await screen.findByText('Offline guest')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Delete account' }),
+    ).not.toBeInTheDocument();
   });
 
   it('remembers offline mode across launches', async () => {

@@ -252,8 +252,60 @@ textarea {
   font-size: 12px;
 }
 
+.danger {
+  background: var(--color-danger);
+  color: var(--color-surface);
+  font-weight: 600;
+}
+
+.danger:hover:not(:disabled) {
+  filter: brightness(0.92);
+}
+
+.link-danger {
+  background: transparent;
+  color: var(--color-danger);
+  padding-inline: var(--space-2);
+}
+
 .error-text {
   color: var(--color-danger);
+}
+
+/* Dialogs */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  background: rgb(0 0 0 / 45%);
+  z-index: 100;
+}
+
+.dialog {
+  width: min(440px, 100%);
+  max-height: calc(100vh - 2 * var(--space-4));
+  overflow: auto;
+  padding: var(--space-6);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.dialog h2 {
+  margin-top: 0;
+}
+
+.dialog ul {
+  padding-left: var(--space-6);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
 }
 
 .info-text {

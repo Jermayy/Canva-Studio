@@ -47,3 +47,25 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  database:
+    # Migrations, RLS policies and functions on plain Postgres with
+    # Supabase auth/storage stubs (supabase/tests/_supabase_stubs.sql).
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: SQL tests (RLS, account deletion, share links)
+        run: bash scripts/test-db.sh
+        env:
+          PGHOST: 127.0.0.1
+          PGUSER: postgres

@@ -108,6 +108,13 @@ export class FakeRemoteStore implements RemoteDesignStore {
     return Promise.resolve(this.assets.get(id) ?? null);
   }
 
+  deleteAllFiles(): Promise<number> {
+    this.maybeFail();
+    const count = this.assets.size;
+    this.assets.clear();
+    return Promise.resolve(count);
+  }
+
   subscribe(
     onChange: () => void,
     onStatus: (status: RealtimeStatus) => void,

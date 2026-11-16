@@ -65,3 +65,11 @@ export function databaseNameFor(workspaceId: string): string {
 export function openWorkspaceDb(workspaceId: string): CanvasStudioDb {
   return new CanvasStudioDb(databaseNameFor(workspaceId));
 }
+
+/**
+ * Permanently deletes a workspace's local database. Other tabs holding it
+ * open are closed by Dexie's default versionchange handling.
+ */
+export function deleteWorkspaceDb(workspaceId: string): Promise<void> {
+  return Dexie.delete(databaseNameFor(workspaceId));
+}

@@ -288,3 +288,62 @@ describe('SupabaseRemoteStore realtime', () => {
     expect(client.removeChannel).toHaveBeenCalledWith(channel);
   });
 });
+
+describe('SupabaseRemoteStore.deleteAllFiles', () => {
+  function withListing(pages: { name: string }[][], removeError = null) {
+    const { store, bucket, client } = setup({ data: null, error: null });
+    const list = vi.fn(() =>
+      Promise.resolve({ data: pages.shift() ?? [], error: null }),
+    );
+    const remove = vi.fn(() => Promise.resolve({ error: removeError }));
+    Object.assign(bucket, { list, remove });
+    return { store, list, remove, client };
+  }
+
+  it('lists and removes the user folder page by page until empty', async () => {
+    const { store, list, remove } = withListing([
+      [{ name: 'a.png' }, { name: 'b.png' }],
+      [{ name: 'c.png' }],
+    ]);
+
+    await expect(store.deleteAllFiles()).resolves.toBe(3);
+    expect(list).toHaveBeenCalledWith('user-1', { limit: 100 });
+    expect(remove).toHaveBeenNthCalledWith(1, ['user-1/a.png', 'user-1/b.png']);
+    expect(remove).toHaveBeenNthCalledWith(2, ['user-1/c.png']);
+  });
+
+  it('succeeds with nothing to delete', async () => {
+    const { store, remove } = withListing([]);
+
+    await expect(store.deleteAllFiles()).resolves.toBe(0);
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it('fails loudly on list or remove errors', async () => {
+    const failingList = setup({ data: null, error: null });
+    Object.assign(failingList.bucket, {
+      list: () => Promise.resolve({ data: null, error: { message: 'denied' } }),
+    });
+    const failingRemove = withListing([[{ name: 'a.png' }]], {
+      message: 'nope',
+    } as never);
+
+    await expect(failingList.store.deleteAllFiles()).rejects.toThrow(
+      'list files failed: denied',
+    );
+    await expect(failingRemove.store.deleteAllFiles()).rejects.toThrow(
+      'delete files failed: nope',
+    );
+  });
+
+  it('gives up instead of looping forever if files never disappear', async () => {
+    const { store, bucket } = setup({ data: null, error: null });
+    Object.assign(bucket, {
+      list: () =>
+        Promise.resolve({ data: [{ name: 'stuck.png' }], error: null }),
+      remove: () => Promise.resolve({ error: null }),
+    });
+
+    await expect(store.deleteAllFiles()).rejects.toThrow('never emptied');
+  });
+});

@@ -23,6 +23,7 @@ npm install
 npm run dev                  # http://localhost:5173
 npm test                     # unit + component tests
 npm run check                # format, lint, typecheck, tests with coverage
+npm run test:db              # SQL tests (RLS, functions) — needs a Postgres, see below
 ```
 
 **No Supabase project is needed to run it.** With no `.env`, the app runs local-only: choose "Continue without an account" and everything except cloud sync works. To enable accounts and sync, see below.
@@ -36,6 +37,17 @@ npm run check                # format, lint, typecheck, tests with coverage
 5. Copy the project URL and **publishable (anon) key** from **Project Settings → API** into `.env` (`cp .env.example .env`).
 
 The publishable key is designed to ship in browsers; row-level security is what protects each user's data. **Never** put the `service_role`/secret key in `.env`: the app refuses to start if you do.
+
+## Database tests
+
+`supabase/tests/*.test.sql` check the migrations' row-level security and functions on plain Postgres, using small stand-ins for Supabase's `auth` and `storage` schemas. CI runs them against a Postgres service container. Locally:
+
+```bash
+docker run --rm -d -p 5432:5432 -e POSTGRES_HOST_AUTH_METHOD=trust postgres:17
+npm run test:db
+```
+
+The stand-ins aren't a full Supabase: behaviour that depends on real Supabase (Storage API, Auth) is covered by the TypeScript tests with fakes and should be smoke-tested in staging.
 
 ## Configuration
 
@@ -100,12 +112,12 @@ See [docs/architecture.md](docs/architecture.md) and [docs/adr/](docs/adr/). The
 
 - **Stored in the browser:** designs and uploaded images in IndexedDB, one database per account. The sign-in session is in localStorage (see ADR 0006).
 - **Stored in the cloud (signed-in users only), in Supabase's Sydney region:** email and password hash (Supabase Auth), designs, and uploaded images.
-- **Deletion:** deleting your auth user removes your designs (`on delete cascade`). Uploaded image objects must currently be removed separately; see Known gaps.
+- **Account deletion (self-service):** _Delete account_ on the home screen, confirmed with your password. It deletes your uploaded files, then your account (which cascades to your designs and share links), then this browser's local copy. The server refuses to delete an account that still has files, so no personal files are orphaned. Each step is safe to retry if it's interrupted.
 
 ## Known gaps
 
 - No password reset or MFA UI yet. Supabase supports both; they need screens.
-- No account-deletion UI yet.
+- Account deletion clears the local copy in the browser where you delete it; other browsers keep their local copy until they're signed out (they can't sync it anywhere).
 - Deleted designs remain as server-side tombstones; there's no scheduled purge yet.
 - The app shell isn't cached for offline reloads (no service worker); local data still works once loaded.
 - No error-tracking service yet; logs go to the browser console as structured JSON.

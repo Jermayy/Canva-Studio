@@ -27,6 +27,8 @@ export interface Workspace {
   designs: LocalDesignRepository;
   assets: AssetRepository;
   sync: SyncEngine | null;
+  /** The cloud store for signed-in users; null for the guest. */
+  remote: RemoteDesignStore | null;
   dispose: () => void;
 }
 
@@ -62,6 +64,7 @@ export function createWorkspace(
       designs,
       assets,
       sync: null,
+      remote: null,
       dispose: () => {
         db.close();
       },
@@ -91,6 +94,7 @@ export function createWorkspace(
     designs,
     assets,
     sync,
+    remote: session.remote,
     dispose: () => {
       stopOnline();
       sync.stop();

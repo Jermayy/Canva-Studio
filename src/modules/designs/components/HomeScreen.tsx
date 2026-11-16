@@ -15,6 +15,8 @@ import { useState } from 'react';
 export interface HomeScreenProps {
   onOpen: (record: DesignRecord) => void;
   onSignOut: () => void;
+  /** Shown for signed-in users only. */
+  onDeleteAccount?: () => void;
   notice: string | null;
   onDismissNotice: () => void;
 }
@@ -30,6 +32,7 @@ const FILTERS: ('All' | TemplateCategory)[] = [
 export function HomeScreen({
   onOpen,
   onSignOut,
+  onDeleteAccount,
   notice,
   onDismissNotice,
 }: HomeScreenProps) {
@@ -75,6 +78,15 @@ export function HomeScreen({
           <button type="button" className="secondary" onClick={onSignOut}>
             {workspace.kind === 'cloud' ? 'Sign out' : 'Sign in'}
           </button>
+          {workspace.kind === 'cloud' && onDeleteAccount && (
+            <button
+              type="button"
+              className="link-danger"
+              onClick={onDeleteAccount}
+            >
+              Delete account
+            </button>
+          )}
         </div>
       </header>
       <Notice

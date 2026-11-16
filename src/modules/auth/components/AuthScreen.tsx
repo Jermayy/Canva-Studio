@@ -6,6 +6,8 @@ export interface AuthScreenProps {
   auth: AuthService | null;
   onSignedIn: (user: AuthUser) => void;
   onContinueOffline: () => void;
+  /** A message carried over from the previous screen (e.g. account deleted). */
+  notice?: string | null;
 }
 
 type Mode = 'sign-in' | 'sign-up';
@@ -14,6 +16,7 @@ export function AuthScreen({
   auth,
   onSignedIn,
   onContinueOffline,
+  notice = null,
 }: AuthScreenProps) {
   const emailId = useId();
   const passwordId = useId();
@@ -57,6 +60,11 @@ export function AuthScreen({
         <p className="muted">
           Design posters and invitations — online or offline.
         </p>
+        {notice && (
+          <p role="status" className="info-text">
+            {notice}
+          </p>
+        )}
 
         {auth ? (
           <form onSubmit={(event) => void submit(event)} noValidate>

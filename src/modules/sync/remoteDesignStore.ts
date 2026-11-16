@@ -51,6 +51,11 @@ export interface RemoteDesignStore {
   downloadAsset(
     id: string,
   ): Promise<{ bytes: ArrayBuffer; mime: string } | null>;
+  /**
+   * Deletes every file the user has in cloud storage (uploads, share
+   * images). Step one of account deletion; returns how many were deleted.
+   */
+  deleteAllFiles(): Promise<number>;
   /** Calls `onChange` when any of the user's designs change remotely. */
   subscribe(
     onChange: () => void,
