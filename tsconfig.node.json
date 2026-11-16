@@ -5,11 +5,5 @@
     "lib": ["ES2023"],
     "types": ["node", "vitest/globals"]
   },
-  "include": [
-    "vite.config.mts",
-    "vitest.config.mts",
-    "playwright.config.ts",
-    "build/**/*",
-    "e2e/**/*"
-  ]
+  "include": ["vite.config.mts", "vitest.config.mts", "build/**/*"]
 }

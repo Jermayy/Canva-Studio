@@ -25,6 +25,8 @@ npm run dev                  # http://localhost:5173
 npm test                     # unit + component tests
 npm run check                # format, lint, typecheck, tests with coverage
 npm run test:db              # SQL tests (RLS, functions) — needs a Postgres, see below
+npx playwright install chromium   # once
+npm run test:e2e             # browser journeys against the production build
 ```
 
 **No Supabase project is needed to run it.** With no `.env`, the app runs local-only: choose "Continue without an account" and everything except cloud sync works. To enable accounts and sync, see below.
@@ -38,6 +40,12 @@ npm run test:db              # SQL tests (RLS, functions) — needs a Postgres, 
 5. Copy the project URL and **publishable (anon) key** from **Project Settings → API** into `.env` (`cp .env.example .env`).
 
 The publishable key is designed to ship in browsers; row-level security is what protects each user's data. **Never** put the `service_role`/secret key in `.env`: the app refuses to start if you do.
+
+## End-to-end tests
+
+`e2e/` runs the critical journeys in Chromium against a production build served by `vite preview`, in local-only mode, so no secrets are needed: create a design from a template, edit it, keep it across reloads (including the last edit when the tab is hidden), download a real PNG, the share page for a bad link, a strict CSP, and no console errors or CSP violations.
+
+Against a deployment, `E2E_BASE_URL=https://<preview-url> npm run test:e2e` also checks the HTTP security headers from `vercel.json`.
 
 ## Database tests
 

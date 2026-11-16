@@ -22,6 +22,8 @@ npm install                  # deps (Node >= 24)
 npm run dev                  # http://localhost:5173 (no .env needed: local-only)
 npm test                     # all tests (node + jsdom projects)
 npm run test:coverage        # with coverage thresholds
+npm run test:db              # SQL/RLS tests on Postgres (PG* env vars; CI uses a service container)
+npm run test:e2e             # Playwright journeys on the production build (E2E_BASE_URL for a deployment)
 npm run lint                 # ESLint (type-aware, strict)
 npm run format:check         # Prettier
 npm run typecheck            # tsc for node + web projects
@@ -64,6 +66,8 @@ Adapted from the portable steering kit the project was started with:
 - jsdom lacks canvas, DragEvent and object URLs: tests mock react-konva globally (`test/reactKonvaMock.tsx`), stub `URL.createObjectURL` in `test/setup.ts`, and set drop coordinates with `createEvent` + `defineProperties`.
 - Zod 4 runs `.refine` even after a prior check fails; guard inputs inside refinements.
 - With fake timers in sync tests, fake only `setTimeout/setInterval` (fake-indexeddb needs real `setImmediate`).
+- Browsers can unload a page before an IndexedDB write started in `beforeunload` finishes: autosave also flushes on `visibilitychange`/`pagehide`, and prompts to leave only while edits are unsaved.
+- E2E specs run `page.evaluate` code in the browser, hence the separate `tsconfig.e2e.json` with DOM types.
 - Konva centred shapes (ellipse/polygon/star) are wrapped in a `Group` so model `x,y` is always the top-left, like rects.
 
 ## Sensitive areas
