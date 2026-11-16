@@ -29,6 +29,11 @@ export interface SyncEngineDeps {
   /** Delay that batches bursts of local edits into one push. */
   debounceMs?: number;
   pageSize?: number;
+  /**
+   * Runs one sync pass exclusively across browser tabs that share this
+   * local database (see `crossTabExclusive`). Defaults to running directly.
+   */
+  runExclusive?: <T>(task: () => Promise<T>) => Promise<T>;
 }
 
 const CURSOR_KEY = 'pull-cursor';
@@ -145,9 +150,10 @@ export class SyncEngine {
   }
 
   private async runLoop(): Promise<void> {
+    const runExclusive = this.deps.runExclusive ?? ((task) => task());
     do {
       this.rerunRequested = false;
-      await this.runOnce();
+      await runExclusive(() => this.runOnce());
     } while (this.takeRerunRequest());
   }
 

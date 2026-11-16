@@ -7,6 +7,12 @@ import {
 } from '@/modules/designs/data/localDb';
 import { LocalDesignRepository } from '@/modules/designs/data/localDesignRepository';
 import type { RemoteDesignStore } from '@/modules/sync/remoteDesignStore';
+import {
+  browserLocks,
+  crossTabExclusive,
+  syncLockName,
+  type LockManagerLike,
+} from '@/modules/sync/crossTabLock';
 import { SyncEngine } from '@/modules/sync/syncEngine';
 import type { Logger } from '@/shared/logger';
 
@@ -34,6 +40,8 @@ export interface WorkspaceEnv {
   /** Registers a callback for regained connectivity; returns cleanup. */
   onOnline: (callback: () => void) => () => void;
   openDb?: (workspaceId: string) => CanvasStudioDb;
+  /** Cross-tab lock manager; defaults to `navigator.locks`. */
+  locks?: LockManagerLike;
 }
 
 export function createWorkspace(
@@ -66,6 +74,10 @@ export function createWorkspace(
     remote: session.remote,
     isOnline: env.isOnline,
     logger: logger.child({ userId: session.user.id }),
+    runExclusive: crossTabExclusive(
+      syncLockName(id),
+      'locks' in env ? env.locks : browserLocks(),
+    ),
   });
   const stopOnline = env.onOnline(() => {
     sync.requestSync(0);

@@ -7,7 +7,15 @@ import {
   type CanvasStudioDb,
 } from '@/modules/designs/data/localDb';
 import { LocalDesignRepository } from '@/modules/designs/data/localDesignRepository';
-import { SyncEngine, type SyncStatus } from '@/modules/sync/syncEngine';
+import {
+  crossTabExclusive,
+  type LockManagerLike,
+} from '@/modules/sync/crossTabLock';
+import {
+  SyncEngine,
+  type SyncEngineDeps,
+  type SyncStatus,
+} from '@/modules/sync/syncEngine';
 import { FakeRemoteStore } from '@/test/fakeRemoteStore';
 import { buildDocument, buildRect } from '@/test/factories';
 import { createLogger } from '@/shared/logger';
@@ -23,7 +31,7 @@ let online: boolean;
 let logLines: string[];
 let engine: SyncEngine;
 
-function makeEngine(overrides: { pageSize?: number } = {}) {
+function makeEngine(overrides: Partial<SyncEngineDeps> = {}) {
   return new SyncEngine({
     local,
     assets,
@@ -249,6 +257,64 @@ describe('SyncEngine pull', () => {
 
     expect(listener).not.toHaveBeenCalled();
     expect(await local.get(created.id)).toMatchObject({ dirty: 0 });
+  });
+});
+
+/** In-memory stand-in for navigator.locks: one holder at a time, FIFO. */
+function fakeLockManager(): LockManagerLike {
+  let tail: Promise<unknown> = Promise.resolve();
+  return {
+    request: (_name, callback) => {
+      const run = tail.then(callback);
+      tail = run.catch(() => undefined);
+      return run;
+    },
+  };
+}
+
+describe('SyncEngine across browser tabs', () => {
+  /** Two engines on one database (two tabs) sync the same edit at once. */
+  async function syncEditFromTwoTabs(locks: LockManagerLike | undefined) {
+    const created = await local.create('Party', buildDocument());
+    await engine.syncNow();
+    await local.saveEdit(created.id, { title: 'Renamed' });
+    // Real requests take time; without it the passes never interleave.
+    const update = remote.update.bind(remote);
+    const updateSpy = vi
+      .spyOn(remote, 'update')
+      .mockImplementation(async (...args) => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return update(...args);
+      });
+    const runExclusive = crossTabExclusive('sync:test', locks);
+    const tabA = makeEngine({ runExclusive });
+    const tabB = makeEngine({ runExclusive });
+
+    await Promise.all([tabA.syncNow(), tabB.syncNow()]);
+
+    return { created, updates: updateSpy.mock.calls.length };
+  }
+
+  it('sends duplicate, conflicting writes when tabs sync concurrently', async () => {
+    // Documents the race the lock prevents (no work is lost either way).
+    const { updates } = await syncEditFromTwoTabs(undefined);
+
+    expect(updates).toBe(2);
+    expect(logLines.join()).toContain('sync.conflict');
+  });
+
+  it('pushes a shared edit exactly once when passes hold the lock', async () => {
+    const { created, updates } = await syncEditFromTwoTabs(fakeLockManager());
+
+    expect(updates).toBe(1);
+    expect(remote.rows.get(created.id)).toMatchObject({
+      title: 'Renamed',
+      version: 2,
+    });
+    expect((await local.list()).map((record) => record.title)).toEqual([
+      'Renamed',
+    ]);
+    expect(logLines.join()).not.toContain('sync.conflict');
   });
 });
 

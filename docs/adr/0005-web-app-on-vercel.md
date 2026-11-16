@@ -34,5 +34,5 @@ Option 1, chosen by the user. Electron, the preload and main process are removed
 - Zero-install; any modern browser. Preview deploys per PR give reviewers a live URL.
 - Security headers live in `vercel.json` (static) and the CSP `<meta>` tag (built per environment because it names the Supabase host).
 - Firefox and several desktop browsers can't share files; they get a download. Email from the server remains a later option.
-- New multi-tab behaviour: several tabs can open the same local database. Handled in ADR 0003's sync engine with a Web Lock (only one tab syncs).
+- New multi-tab behaviour: several tabs can open the same local database and sync it at once, sending duplicate, conflicting writes. Sync passes are serialised across tabs with a Web Lock (`sync/crossTabLock.ts`).
 - Browsers may evict IndexedDB data (Safari after 7 days without a visit). The app requests persistent storage and nudges guests to sign in; see README "Known gaps".
