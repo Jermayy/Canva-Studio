@@ -3,3 +3,6 @@ dist
 coverage
 node_modules
 package-lock.json
+
+# gitleaks report written into the workspace by the CI secret scan
+results.sarif

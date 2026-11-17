@@ -31,3 +31,6 @@ AGENTS.md
 .vercel/
 playwright-report/
 test-results/
+
+# gitleaks report (CI secret scan)
+results.sarif
