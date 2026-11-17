@@ -6,7 +6,13 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['out/**', 'dist/**', 'coverage/**', 'node_modules/**'],
+    ignores: [
+      'dist/**',
+      'coverage/**',
+      'node_modules/**',
+      'playwright-report/**',
+      'test-results/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
@@ -35,7 +41,7 @@ export default tseslint.config(
             {
               group: ['./*', '../*'],
               message:
-                'Use absolute aliases (@renderer, @shared, @main), not relative imports.',
+                'Use absolute aliases (@/…, @build/…), not relative imports.',
             },
           ],
         },
@@ -43,7 +49,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/renderer/**/*.{ts,tsx}'],
+    files: ['src/**/*.{ts,tsx}'],
     languageOptions: { globals: globals.browser },
     plugins: {
       'react-hooks': reactHooks,
@@ -55,14 +61,28 @@ export default tseslint.config(
         'warn',
         { allowConstantExport: true },
       ],
+      // The session lives in browser storage, so XSS is the critical risk
+      // (ADR 0006): no raw HTML injection anywhere.
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+          message: 'Raw HTML injection is banned (ADR 0006).',
+        },
+      ],
     },
   },
   {
-    files: ['src/main/**/*.ts', 'src/preload/**/*.ts', '*.config.{mjs,mts}'],
+    files: ['build/**/*.ts', 'e2e/**/*.ts', '*.config.{mjs,mts,ts}'],
     languageOptions: { globals: globals.node },
   },
   {
-    files: ['**/*.test.{ts,tsx}', 'src/renderer/src/test/**'],
+    // Config files load before Vite's aliases exist.
+    files: ['*.config.{mjs,mts,ts}'],
+    rules: { 'no-restricted-imports': 'off' },
+  },
+  {
+    files: ['**/*.test.{ts,tsx}', 'src/test/**', 'e2e/**'],
     rules: {
       '@typescript-eslint/no-unsafe-assignment': 'off',
       '@typescript-eslint/no-unsafe-member-access': 'off',

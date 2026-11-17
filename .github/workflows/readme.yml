@@ -1,0 +1,35 @@
+name: README
+
+# Every PR must update README.md (project convention: docs change in the same
+# PR as the behaviour). Opt out with the `skip-readme` label when a PR has
+# nothing user- or developer-facing to document; Dependabot PRs are exempt.
+# Separate from ci.yml so adding/removing the label doesn't rerun the full suite.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  readme-updated:
+    if: >-
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
+      !contains(github.event.pull_request.labels.*.name, 'skip-readme')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check README.md changed
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if git diff --quiet "origin/${BASE_REF}...HEAD" -- README.md; then
+            echo "::error file=README.md::This PR doesn't update README.md. Update it, or add the 'skip-readme' label if there is genuinely nothing to document."
+            exit 1
+          fi
+          echo "README.md updated."

@@ -2,7 +2,7 @@
 node_modules/
 
 # Build output
-out/
+# (Vite builds to dist/)
 dist/
 coverage/
 *.tsbuildinfo
@@ -26,3 +26,11 @@ coverage/
 .gemini/
 .aider*
 AGENTS.md
+
+# Vercel / Playwright
+.vercel/
+playwright-report/
+test-results/
+
+# gitleaks report (CI secret scan)
+results.sarif
