@@ -134,6 +134,7 @@ See [docs/architecture.md](docs/architecture.md) and [docs/adr/](docs/adr/). The
 - **Offline:** editing, saving and guest mode work offline once the page has loaded, and sync catches up when you reconnect. Opening or reloading the page with no connection doesn't work yet: that needs a service worker to cache the app shell (planned). The app asks the browser to keep its data (persistent storage) when you create a design; guests see a note that browser storage can be cleared.
 - No error-tracking service yet; logs go to the browser console as structured JSON.
 - PDF export is a raster image (PNG) inside a PDF: fine for screens and home printing, not for large-format print.
+- **Held-back dependencies:** TypeScript stays on 6.x until typescript-eslint supports 7 (its peer range is `<6.1.0`), and `@types/node` stays on 24.x to match the Node 24 runtime. Dependabot is told to skip those majors in `.github/dependabot.yml`; lift the ignore when the blocker goes away.
 
 ## Contributing
 
