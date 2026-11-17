@@ -54,6 +54,7 @@ Adapted from the portable steering kit the project was started with:
 - Add tests to an existing test file where one exists. Coverage targets: domain/state/data/sync ≥ 90% lines, components ≥ 70% (enforced in `vitest.config.mts`).
 - Logging only via `@shared/logger` (structured JSON, secret keys redacted). `console` is lint-banned elsewhere.
 - Never commit or push unless explicitly asked.
+- Every PR updates `README.md` (features, setup, config, structure, known gaps — whatever the change affects). CI enforces it (`.github/workflows/readme.yml`); the `skip-readme` label opts out only when there's genuinely nothing to document.
 
 ## Deviations from the playbook
 

@@ -135,6 +135,10 @@ See [docs/architecture.md](docs/architecture.md) and [docs/adr/](docs/adr/). The
 - No error-tracking service yet; logs go to the browser console as structured JSON.
 - PDF export is a raster image (PNG) inside a PDF: fine for screens and home printing, not for large-format print.
 
+## Contributing
+
+Every pull request updates this README to match the change (features, setup, configuration, structure, known gaps). CI's **README** check fails a PR that doesn't touch it; add the `skip-readme` label only when there's genuinely nothing to document. Dependabot PRs are exempt.
+
 ## Standards
 
 Follows the engineering playbook (`~/Coding Projects/engineering-playbook`).
