@@ -11,6 +11,33 @@ coverage/
 .env
 .env.*
 !.env.example
+*.local
+
+# Secrets: keys, certificates, credential files
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa*
+id_ed25519*
+.npmrc
+.netrc
+*credentials*.json
+*service-account*.json
+*.secret
+secrets/
+
+# Supabase CLI local state (linked project ref, pooler URL, branches)
+supabase/.temp/
+supabase/.branches/
+
+# Local databases / dumps (may contain real user data)
+*.sqlite
+*.sqlite3
+*.db
+*.dump
 
 # OS / editor
 .DS_Store
