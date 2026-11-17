@@ -32,7 +32,7 @@ npm run build                # typecheck + production bundle in dist/
 npm run preview              # serve dist/ locally
 ```
 
-DB migration: apply `supabase/migrations/*.sql` via `supabase db push` or the dashboard SQL editor.
+DB migration: `npx supabase db push --remote` (staging, then production after merge). Deploys, environments, dashboard-only Vercel/Supabase settings and rollback: `docs/runbooks/deploy.md`.
 
 ## Structure
 
