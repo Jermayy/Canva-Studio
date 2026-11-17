@@ -7,6 +7,13 @@ updates:
     groups:
       dev-tooling:
         dependency-type: development
+    ignore:
+      # typescript-eslint only supports TypeScript < 6.1 (peer range); a TS 7 bump can't install.
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+      # Keep Node typings on the runtime's major (Node 24, see .nvmrc).
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
   - package-ecosystem: github-actions
     directory: /
     schedule:
