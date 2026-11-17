@@ -34,9 +34,9 @@ npm run test:e2e             # browser journeys against the production build
 ## Setting up cloud sync (Supabase)
 
 1. Create a project at [supabase.com](https://supabase.com) in the **Sydney (ap-southeast-2)** region (see Data and privacy).
-2. Apply the migrations in `supabase/migrations/`, in order. Either paste them into the dashboard SQL editor, or with the Supabase CLI run `supabase link` and then `supabase db push`.
+2. Apply the migrations in `supabase/migrations/`, in order: `npx supabase link --project-ref <ref>` then `npx supabase db push --remote` (without `--remote` the CLI targets a local Docker stack).
 3. Under **Authentication → Providers**, keep Email enabled. Leaving "Confirm email" on is recommended.
-4. Under **Authentication → URL Configuration**, set the Site URL to your deployed URL and add `http://localhost:5173` to the redirect allow-list.
+4. Under **Authentication → URL Configuration**, set the Site URL (production: the deployed URL; staging: `http://localhost:5173`, not Supabase's default `:3000`) and the redirect allow-list (see the runbook).
 5. Copy the project URL and **publishable (anon) key** from **Project Settings → API** into `.env` (`cp .env.example .env`).
 
 The publishable key is designed to ship in browsers; row-level security is what protects each user's data. **Never** put the `service_role`/secret key in `.env`: the app refuses to start if you do.
@@ -78,6 +78,8 @@ The app is a static SPA. `vercel.json` sets the build, SPA rewrites, long-lived 
 3. Every pull request gets a preview URL; merging to `main` deploys production.
 
 Rollback: promote the previous deployment in the Vercel dashboard (instant, no rebuild).
+
+**Live:** https://canvas-studio-jermayys-projects.vercel.app. The exact environments, dashboard-only settings, migration routine, smoke test and rollback steps are in [docs/runbooks/deploy.md](docs/runbooks/deploy.md).
 
 ## Keyboard shortcuts
 
