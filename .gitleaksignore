@@ -1,0 +1,5 @@
+# Reviewed gitleaks false positives, one fingerprint per line (commit:file:rule:line).
+# Add an entry only after confirming the value isn't a real secret.
+
+# Placeholder "sb_publishable_123" in a config unit test (not a real key).
+5157ff6965af007b63f7112950bcacfbdb298018:src/app/config.test.ts:generic-api-key:21
