@@ -18,12 +18,12 @@ describe('parseConfig', () => {
     expect(
       parseConfig({
         VITE_SUPABASE_URL: 'https://abc.supabase.co',
-        VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_123',
+        VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_123', // gitleaks:allow (test placeholder)
       }),
     ).toEqual({
       supabase: {
         url: 'https://abc.supabase.co',
-        publishableKey: 'sb_publishable_123',
+        publishableKey: 'sb_publishable_123', // gitleaks:allow (test placeholder)
       },
     });
   });
