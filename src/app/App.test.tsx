@@ -1,252 +1,178 @@
 import { App } from '@/app/App';
-import { createWorkspace } from '@/app/workspace';
-import type { AuthService, AuthUser } from '@/modules/auth/authService';
-import { openWorkspaceDb } from '@/modules/designs/data/localDb';
-import { editorStore } from '@/modules/editor/state/editorStore';
-import { FakeRemoteStore } from '@/test/fakeRemoteStore';
-import { testServices } from '@/test/renderWithProviders';
-import { render, screen, waitFor } from '@testing-library/react';
+import { navigate } from '@/app/router';
+import { createTestServices } from '@/test/testServices';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-const USER: AuthUser = { id: 'user-1', email: 'sam@example.com' };
+const PASSWORD = 'Plenty-long-pass-42';
 
-function fakeAuth(currentUser: AuthUser | null = null) {
-  let signedOut: () => void = () => {};
-  const auth = {
-    currentUser: vi.fn(() => Promise.resolve(currentUser)),
-    signIn: vi.fn(() => Promise.resolve({ ok: true as const, user: USER })),
-    signUp: vi.fn(),
-    signOut: vi.fn(() => Promise.resolve()),
-    verifyPassword: vi.fn(() =>
-      Promise.resolve({ ok: true as const, user: USER }),
-    ),
-    deleteAccount: vi.fn(() => {
-      // Like Supabase: clearing the session emits SIGNED_OUT.
-      signedOut();
-      return Promise.resolve();
-    }),
-    onSignedOut: vi.fn((listener: () => void) => {
-      signedOut = listener;
-      return () => undefined;
-    }),
-  };
-  return {
-    auth: auth as unknown as AuthService & typeof auth,
-    revoke: () => {
-      signedOut();
-    },
-  };
+function start(path = '/') {
+  window.history.replaceState(null, '', path);
+  const { services, files } = createTestServices();
+  render(<App services={services} />);
+  return { services, files, user: userEvent.setup() };
 }
 
-/** Real workspaces, isolated databases. */
-const isolatedWorkspaces: typeof createWorkspace = (session, env) =>
-  createWorkspace(session, {
-    ...env,
-    openDb: (id) => openWorkspaceDb(`${id}-${crypto.randomUUID()}`),
-  });
-
-function renderApp(auth: AuthService | null) {
-  return render(
-    <App
-      services={testServices()}
-      auth={auth}
-      createRemote={() => new FakeRemoteStore()}
-      workspaceFactory={isolatedWorkspaces}
-    />,
-  );
+async function signUp(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(screen.getByLabelText('Name'), 'Ann Lee');
+  await user.type(screen.getByLabelText('Email'), 'ann@example.test');
+  await user.type(screen.getByLabelText('Password'), PASSWORD);
+  await user.click(screen.getByRole('button', { name: 'Create account' }));
+  await screen.findByRole('heading', { name: 'Projects' });
 }
-
-beforeEach(() => {
-  localStorage.clear();
-});
-
-afterEach(() => {
-  editorStore.getState().close();
-});
 
 describe('App', () => {
-  it('shows sign-in when there is no saved session', async () => {
-    renderApp(fakeAuth().auth);
-
+  it('shows the landing page with sign-up and sandbox entry points', async () => {
+    start('/');
     expect(
-      await screen.findByRole('heading', { name: 'Sign in' }),
+      screen.getByRole('heading', { name: /Event graphics/ }),
     ).toBeInTheDocument();
-  });
-
-  it('restores a saved session straight to the home screen', async () => {
-    renderApp(fakeAuth(USER).auth);
-
-    expect(await screen.findByText('sam@example.com')).toBeInTheDocument();
-  });
-
-  it('signs in, then signs out back to the sign-in screen', async () => {
-    const { auth } = fakeAuth();
-    renderApp(auth);
-
-    await userEvent.type(await screen.findByLabelText('Email'), USER.email);
-    await userEvent.type(screen.getByLabelText('Password'), 'long-password');
-    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
-    await userEvent.click(
-      await screen.findByRole('button', { name: 'Sign out' }),
-    );
-
-    expect(auth.signOut).toHaveBeenCalled();
     expect(
-      await screen.findByRole('heading', { name: 'Sign in' }),
+      screen.getByRole('link', { name: /Try without an account/ }),
+    ).toHaveAttribute('href', '/sandbox');
+    expect(screen.getByText(/nothing is sent to a server/)).toBeInTheDocument();
+    await act(async () => {
+      await Promise.resolve();
+    });
+  });
+
+  it('redirects signed-out visitors from projects to sign-in, keeping where they were going', async () => {
+    start('/projects?type=party');
+    await screen.findByRole('heading', { name: 'Welcome back' });
+    expect(window.location.pathname).toBe('/sign-in');
+    expect(new URLSearchParams(window.location.search).get('next')).toBe(
+      '/projects?type=party',
+    );
+  });
+
+  it('signs up, creates a design, manages it on the dashboard and signs out', async () => {
+    const { user } = start('/sign-up');
+    await screen.findByRole('heading', { name: 'Create your studio' });
+    await user.click(screen.getByRole('button', { name: 'Create account' }));
+    expect(screen.getByText('Enter your name.')).toBeInTheDocument();
+    await signUp(user);
+    expect(screen.getByText('0 designs')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Festive Dinner/ }));
+    await screen.findByRole('application');
+    expect(screen.getByLabelText('Design name')).toHaveValue('Festive Dinner');
+    await user.click(screen.getByRole('link', { name: 'Back to projects' }));
+
+    await screen.findByText('1 design');
+    expect(
+      screen.getByRole('link', { name: 'Festive Dinner' }),
     ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole('button', { name: 'Actions for Festive Dinner' }),
+    );
+    await user.click(screen.getByRole('menuitem', { name: 'Duplicate' }));
+    await screen.findByText('2 designs');
+
+    await user.click(
+      screen.getByRole('button', { name: 'Actions for Festive Dinner copy' }),
+    );
+    await user.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    const rename = screen.getByLabelText('Design name');
+    await user.clear(rename);
+    await user.type(rename, 'Team lunch{Enter}');
+    expect(
+      await screen.findByRole('link', { name: 'Team lunch' }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole('checkbox', { name: /Corporate/ }));
+    expect(await screen.findByText('No designs match')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Clear filters' }));
+    await user.type(screen.getByLabelText('Search designs'), 'lunch');
+    await screen.findByText('1 of 2 designs match your filters');
+    await user.clear(screen.getByLabelText('Search designs'));
+
+    await user.click(screen.getByRole('radio', { name: 'List view' }));
+    expect(document.querySelector('.project-grid--list')).not.toBeNull();
+
+    await user.click(
+      screen.getByRole('button', { name: 'Actions for Team lunch' }),
+    );
+    await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+    await screen.findByText('1 design');
+    await user.click(screen.getByRole('button', { name: 'Undo' }));
+    await screen.findByText('2 designs');
+
+    await user.click(screen.getByRole('button', { name: /Account: Ann Lee/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Sign out' }));
+    await screen.findByRole('heading', { name: /Event graphics/ });
+    expect(screen.getByText(/You’re signed out/)).toBeInTheDocument();
   });
 
-  it('deletes the account and returns to sign-in with a confirmation', async () => {
-    const { auth } = fakeAuth(USER);
-    renderApp(auth);
-
-    await userEvent.click(
-      await screen.findByRole('button', { name: 'Delete account' }),
-    );
-    await userEvent.type(
-      screen.getByLabelText('Enter your password to confirm'),
-      'long-password{Enter}',
-    );
-
+  it('signs back in, and rejects a wrong password without revealing which part was wrong', async () => {
+    const { user } = start('/sign-up');
+    await signUp(user);
+    await user.click(screen.getByRole('button', { name: /Account: Ann Lee/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Sign out' }));
+    await screen.findByRole('heading', { name: /Event graphics/ });
+    act(() => {
+      navigate('/sign-in');
+    });
+    await user.type(await screen.findByLabelText('Email'), 'ann@example.test');
+    await user.type(screen.getByLabelText('Password'), 'Wrong-password-1');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
     expect(
-      await screen.findByText(
-        'Your account and all its data have been deleted.',
+      await screen.findByText('Email or password is incorrect.'),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Password')).toHaveValue('');
+    await user.type(screen.getByLabelText('Password'), PASSWORD);
+    await user.click(screen.getByRole('button', { name: 'Show password' }));
+    expect(screen.getByLabelText('Password')).toHaveAttribute('type', 'text');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByRole('heading', { name: 'Projects' });
+  });
+
+  it('runs the sandbox without an account and warns that nothing is saved', async () => {
+    const { user } = start('/sandbox');
+    await screen.findByRole('heading', { name: 'Pick a starting point' });
+    await user.click(screen.getByRole('button', { name: /Square post/ }));
+    await screen.findByRole('application');
+    expect(screen.getByText('Not saved')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Nothing is saved: closing this tab discards the design/,
       ),
     ).toBeInTheDocument();
-    expect(auth.verifyPassword).toHaveBeenCalledWith('long-password');
-    expect(auth.deleteAccount).toHaveBeenCalled();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await user.keyboard('{Meta>}s{/Meta}');
     expect(
-      screen.getByRole('heading', { name: 'Sign in' }),
+      await screen.findByText(/Sandbox designs aren’t saved/),
     ).toBeInTheDocument();
   });
 
-  it('keeps the dialog open and the account when deletion fails', async () => {
-    const { auth } = fakeAuth(USER);
-    auth.verifyPassword.mockResolvedValueOnce({
-      ok: false,
-      message: 'Email or password is incorrect.',
-    } as never);
-    renderApp(auth);
-
-    await userEvent.click(
-      await screen.findByRole('button', { name: 'Delete account' }),
-    );
-    await userEvent.type(
-      screen.getByLabelText('Enter your password to confirm'),
-      'wrong-password{Enter}',
-    );
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('incorrect');
-    expect(auth.deleteAccount).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.getByText('sam@example.com')).toBeInTheDocument();
-  });
-
-  it('does not offer account deletion to guests', async () => {
-    renderApp(fakeAuth().auth);
-    await userEvent.click(
-      await screen.findByRole('button', { name: /Continue offline/ }),
-    );
-
-    expect(await screen.findByText('Offline guest')).toBeInTheDocument();
+  it('shows a helpful page for unknown links and missing designs', async () => {
+    const { user } = start('/nowhere');
     expect(
-      screen.queryByRole('button', { name: 'Delete account' }),
-    ).not.toBeInTheDocument();
-  });
-
-  it('remembers offline mode across launches', async () => {
-    const first = renderApp(fakeAuth().auth);
-    await userEvent.click(
-      await screen.findByRole('button', { name: /Continue offline/ }),
-    );
-    expect(await screen.findByText('Offline guest')).toBeInTheDocument();
-    first.unmount();
-
-    renderApp(fakeAuth().auth);
-
-    expect(await screen.findByText('Offline guest')).toBeInTheDocument();
-  });
-
-  it('runs local-only when cloud sync is not configured', async () => {
-    renderApp(null);
-
-    await userEvent.click(
-      await screen.findByRole('button', { name: /Continue offline/ }),
-    );
-
-    expect(await screen.findByText('Offline guest')).toBeInTheDocument();
-  });
-
-  it('opens the editor from a template and returns home', async () => {
-    renderApp(null);
-    await userEvent.click(
-      await screen.findByRole('button', { name: /Continue offline/ }),
-    );
-
-    await userEvent.click(
-      await screen.findByRole('button', { name: /Balloon birthday/ }),
-    );
-    expect(await screen.findByLabelText('Design title')).toHaveValue(
-      'Balloon birthday',
-    );
-
-    await userEvent.click(screen.getByRole('button', { name: '← Designs' }));
-    expect(
-      await screen.findByRole('heading', { name: 'Your designs' }),
+      await screen.findByText('We couldn’t find that page'),
     ).toBeInTheDocument();
+    act(() => {
+      navigate('/sign-up');
+    });
+    await signUp(user);
+    act(() => {
+      navigate('/studio/00000000-0000-4000-8000-999999999999');
+    });
     expect(
-      await screen.findByText('Balloon birthday', {
-        selector: '.design-title',
-      }),
+      await screen.findByText('This design isn’t here'),
     ).toBeInTheDocument();
+    const toasts = within(screen.getByRole('list', { name: 'Notifications' }));
+    expect(toasts.queryAllByRole('listitem')).toHaveLength(0);
   });
 
-  it('carries editor notices back to the home screen', async () => {
-    renderApp(null);
-    await userEvent.click(
-      await screen.findByRole('button', { name: /Continue offline/ }),
+  it('dismisses a toast', async () => {
+    const { services, user } = start('/');
+    act(() => {
+      services.toasts.getState().notify('Hello there');
+    });
+    await user.click(
+      await screen.findByRole('button', { name: 'Dismiss notification' }),
     );
-    await userEvent.click(
-      await screen.findByRole('button', { name: /Party night/ }),
-    );
-    await screen.findByLabelText('Design title');
-
-    editorStore.setState({ notice: 'Something to report' });
-    await userEvent.click(screen.getByRole('button', { name: '← Designs' }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Something to report',
-    );
-    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-  });
-
-  it('returns to sign-in when the session is revoked elsewhere', async () => {
-    const { auth, revoke } = fakeAuth(USER);
-    renderApp(auth);
-    await screen.findByText('sam@example.com');
-
-    revoke();
-
-    expect(
-      await screen.findByRole('heading', { name: 'Sign in' }),
-    ).toBeInTheDocument();
-  });
-
-  it('ignores sign-out events for guests', async () => {
-    const { auth, revoke } = fakeAuth();
-    renderApp(auth);
-    await userEvent.click(
-      await screen.findByRole('button', { name: /Continue offline/ }),
-    );
-    await screen.findByText('Offline guest');
-
-    revoke();
-
     await waitFor(() => {
-      expect(screen.getByText('Offline guest')).toBeInTheDocument();
+      expect(screen.queryByText('Hello there')).toBeNull();
     });
   });
 });

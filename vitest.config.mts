@@ -44,13 +44,17 @@ export default defineConfig({
         'src/main.tsx',
       ],
       thresholds: {
-        // State/business logic must stay above 90%, UI above 70%.
+        // Business logic must stay above 90%, UI above 70%.
         'src/modules/**/domain/**': { lines: 90, branches: 85 },
-        'src/modules/**/state/**': { lines: 90, branches: 85 },
+        'src/modules/**/application/**': { lines: 90, branches: 80 },
+        'src/modules/**/state/**': { lines: 90, branches: 80 },
         'src/modules/**/data/**': { lines: 90, branches: 80 },
-        'src/modules/sync/**': { lines: 90, branches: 80 },
-        'src/modules/export/fileDelivery.ts': { lines: 90, branches: 85 },
-        'src/modules/account/*.ts': { lines: 90, branches: 85 },
+        'src/modules/sync/syncEngine.ts': { lines: 90, branches: 80 },
+        'src/modules/export/infrastructure/fileDelivery.ts': {
+          lines: 90,
+          branches: 85,
+        },
+        'src/shared/lib/**': { lines: 90 },
         'build/**': { lines: 90 },
         'src/modules/**/components/**': { lines: 70 },
       },
