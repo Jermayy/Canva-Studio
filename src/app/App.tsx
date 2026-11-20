@@ -9,7 +9,10 @@ import {
   type AppServices,
   type Workspace,
 } from '@/app/services';
+import type { AuthSuccess } from '@/modules/auth/application/authService';
 import type { StoredSession } from '@/modules/auth/application/ports';
+import { RecoveryCodeDialog } from '@/modules/auth/components/RecoveryCode';
+import { ResetPasswordPage } from '@/modules/auth/components/ResetPasswordPage';
 import { AuthPage } from '@/modules/auth/components/AuthPage';
 import { LandingPage } from '@/modules/landing/LandingPage';
 import { applyPreferences } from '@/modules/preferences/preferences';
@@ -90,7 +93,7 @@ function Routes({
 }: {
   route: Route;
   auth: AuthState;
-  onAuthenticated: (stored: StoredSession, next: string) => void;
+  onAuthenticated: (success: AuthSuccess, next: string) => void;
 }) {
   const location = useLocation();
   switch (route.name) {
@@ -105,8 +108,21 @@ function Routes({
         <AuthPage
           mode={route.name}
           next={route.next}
-          onAuthenticated={(stored) => {
-            onAuthenticated(stored, route.next);
+          onAuthenticated={(success) => {
+            onAuthenticated(success, route.next);
+          }}
+        />
+      );
+    case 'reset-password':
+      if (auth.status === 'signed-in') {
+        return <Redirect to="/projects" />;
+      }
+      return (
+        <ResetPasswordPage
+          email={route.email}
+          code={route.code}
+          onAuthenticated={(success) => {
+            onAuthenticated(success, '/projects');
           }}
         />
       );
@@ -143,6 +159,8 @@ export function App({ services }: { services: AppServices }) {
   const location = useLocation();
   const route = parseRoute(location.pathname, location.search);
   const [auth, setAuth] = useState<AuthState>({ status: 'restoring' });
+  // Shown once, right after the keyring issues a code.
+  const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
   const workspace = auth.status === 'signed-in' ? auth.workspace : null;
 
   useFlushOnHide(workspace);
@@ -224,14 +242,23 @@ export function App({ services }: { services: AppServices }) {
             <Routes
               route={route}
               auth={auth}
-              onAuthenticated={(stored, next) => {
-                open(stored);
+              onAuthenticated={(success, next) => {
+                open(success.stored);
+                setRecoveryCode(success.recoveryCode);
                 navigate(next, { replace: true });
               }}
             />
           </Suspense>
         </ErrorBoundary>
       </SessionContext>
+      {recoveryCode && (
+        <RecoveryCodeDialog
+          code={recoveryCode}
+          onDone={() => {
+            setRecoveryCode(null);
+          }}
+        />
+      )}
       <Toaster store={services.toasts} />
     </ServicesContext>
   );

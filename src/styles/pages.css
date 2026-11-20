@@ -1196,3 +1196,42 @@
     display: none;
   }
 }
+
+/* ---------- Password reset & recovery codes ---------- */
+
+.auth-form__forgot {
+  justify-self: end;
+  margin-top: -0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.recovery-code {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.recovery-code__value {
+  display: block;
+  padding: 0.9rem 1rem;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+  font-family: var(--font-mono);
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: center;
+  user-select: all;
+}
+
+.recovery-code__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.centered-page .auth-card {
+  display: grid;
+  gap: 1rem;
+}

@@ -18,6 +18,8 @@ import { createSyncEngine, type Connectivity } from '@/modules/sync/syncEngine';
 import {
   createMemoryAssetStore,
   createMemoryDocumentStore,
+  type AssetStore,
+  type DocumentStore,
 } from '@/modules/workspace/data/stores';
 import { createWorkspaceStore } from '@/modules/workspace/state/workspaceStore';
 import { createMemoryKeyValueStore } from '@/shared/lib/keyValueStore';
@@ -67,7 +69,33 @@ export function createTestServices(overrides: Partial<AppServices> = {}) {
   };
   const accounts = new AccountsDatabase(`test-accounts-${databaseCounter}`);
   const files = fakeFiles();
-  const openWith = (kind: Workspace['kind']): Workspace => {
+  // Like the real per-user databases, an account's data outlives sign-out.
+  const accountStores = new Map<
+    string,
+    { documents: DocumentStore; assets: AssetStore }
+  >();
+  const storesFor = (userId: string | null) => {
+    if (userId === null) {
+      return {
+        documents: createMemoryDocumentStore(),
+        assets: createMemoryAssetStore(),
+      };
+    }
+    const existing = accountStores.get(userId);
+    if (existing) {
+      return existing;
+    }
+    const created = {
+      documents: createMemoryDocumentStore(),
+      assets: createMemoryAssetStore(),
+    };
+    accountStores.set(userId, created);
+    return created;
+  };
+  const openWith = (
+    kind: Workspace['kind'],
+    userId: string | null = null,
+  ): Workspace => {
     const sync =
       kind === 'account'
         ? createSyncEngine({
@@ -78,8 +106,7 @@ export function createTestServices(overrides: Partial<AppServices> = {}) {
           })
         : null;
     const store = createWorkspaceStore({
-      documents: createMemoryDocumentStore(),
-      assets: createMemoryAssetStore(),
+      ...storesFor(userId),
       logger,
       persistent: kind === 'account',
       now: () => NOW,
@@ -132,7 +159,7 @@ export function createTestServices(overrides: Partial<AppServices> = {}) {
     },
     now: () => NOW,
     createId,
-    openWorkspace: () => openWith('account'),
+    openWorkspace: ({ session }) => openWith('account', session.userId),
     openSandbox: () => openWith('sandbox'),
     ...overrides,
   };

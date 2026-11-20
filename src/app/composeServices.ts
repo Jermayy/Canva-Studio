@@ -63,6 +63,7 @@ export async function composeBrowserServices(options: {
           await import('@/modules/auth/infrastructure/supabaseClient')
         ).createSupabaseAuthClient(config.supabase, window.localStorage),
         `${window.location.origin}/sign-in`,
+        `${window.location.origin}/reset-password`,
       )
     : createLocalIdentityProvider({ db: accounts, createId, now });
 

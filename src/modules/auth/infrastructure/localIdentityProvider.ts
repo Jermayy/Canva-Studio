@@ -79,5 +79,37 @@ export function createLocalIdentityProvider(options: {
     signOut: () => Promise.resolve(),
 
     currentUserId: () => Promise.resolve(null),
+
+    findAccount: async (email) => {
+      const account = await options.db.accounts
+        .where('email')
+        .equals(email)
+        .first();
+      return account
+        ? {
+            userId: account.id,
+            email: account.email,
+            displayName: account.displayName,
+          }
+        : null;
+    },
+
+    updatePassword: async (userId, newPassword) => {
+      const salt = randomSalt();
+      const verifier = await deriveVerifier(newPassword, salt, iterations);
+      const updated = await options.db.accounts.update(userId, {
+        salt: toBase64(salt),
+        verifier: toBase64(verifier),
+        iterations,
+      });
+      if (updated === 0) {
+        throw new AuthError('invalid-credentials');
+      }
+    },
+
+    // Device-local accounts have no email channel; resets use a recovery code.
+    requestPasswordReset: () => Promise.reject(new AuthError('unknown')),
+    exchangeResetCode: () =>
+      Promise.reject(new AuthError('reset-link-invalid')),
   };
 }

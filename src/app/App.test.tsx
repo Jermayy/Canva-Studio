@@ -19,6 +19,27 @@ async function signUp(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText('Password'), PASSWORD);
   await user.click(screen.getByRole('button', { name: 'Create account' }));
   await screen.findByRole('heading', { name: 'Projects' });
+  return saveRecoveryCode(user);
+}
+
+/** The one-time recovery code dialog must be acknowledged before continuing. */
+async function saveRecoveryCode(user: ReturnType<typeof userEvent.setup>) {
+  const dialog = await screen.findByRole('dialog', {
+    name: 'Save your recovery code',
+  });
+  const code = within(dialog).getByLabelText('Recovery code').textContent;
+  const proceed = within(dialog).getByRole('button', { name: 'Continue' });
+  expect(proceed).toBeDisabled();
+  await user.click(
+    within(dialog).getByRole('checkbox', { name: /stored my recovery code/ }),
+  );
+  await user.click(proceed);
+  await waitFor(() => {
+    expect(
+      screen.queryByRole('dialog', { name: 'Save your recovery code' }),
+    ).toBeNull();
+  });
+  return code;
 }
 
 describe('App', () => {
@@ -174,5 +195,113 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.queryByText('Hello there')).toBeNull();
     });
+  });
+
+  it('resets a forgotten password with the recovery code and keeps the designs', async () => {
+    const { user, files } = start('/sign-up');
+    const code = await signUp(user);
+    expect(code).toMatch(/^([0-9A-Z]{4}-){4}[0-9A-Z]{4}$/);
+    await user.click(screen.getByRole('button', { name: /Festive Dinner/ }));
+    await screen.findByRole('application');
+    await user.click(screen.getByRole('link', { name: 'Back to projects' }));
+    await screen.findByText('1 design');
+    await user.click(screen.getByRole('button', { name: /Account: Ann Lee/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Sign out' }));
+    await screen.findByRole('heading', { name: /Event graphics/ });
+
+    act(() => {
+      navigate('/sign-in');
+    });
+    await user.type(await screen.findByLabelText('Email'), 'ann@example.test');
+    await user.click(screen.getByRole('link', { name: 'Forgot password?' }));
+    await screen.findByRole('heading', { name: 'Reset your password' });
+    expect(screen.getByLabelText('Email')).toHaveValue('ann@example.test');
+
+    await user.type(
+      screen.getByLabelText('Recovery code'),
+      'AAAA-AAAA-AAAA-AAAA-AAAA',
+    );
+    await user.type(screen.getByLabelText('New password'), 'Brand-new-pass-77');
+    await user.click(
+      screen.getByRole('button', { name: 'Reset password and sign in' }),
+    );
+    expect(
+      await screen.findByText('Email or recovery code is incorrect.'),
+    ).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText('Recovery code'));
+    await user.type(screen.getByLabelText('Recovery code'), code.toLowerCase());
+    await user.click(
+      screen.getByRole('button', { name: 'Reset password and sign in' }),
+    );
+    await screen.findByRole('heading', { name: 'Projects' });
+    expect(
+      await screen.findByRole('link', { name: 'Festive Dinner' }),
+    ).toBeInTheDocument();
+    expect(files.downloads).toHaveLength(0);
+  });
+
+  it('changes the password and issues a new recovery code from the account menu', async () => {
+    const { user, services } = start('/sign-up');
+    await signUp(user);
+    await user.click(screen.getByRole('button', { name: /Account: Ann Lee/ }));
+    await user.click(
+      screen.getByRole('menuitem', { name: 'Password & recovery' }),
+    );
+    const dialog = screen.getByRole('dialog', { name: 'Password & recovery' });
+    await user.type(
+      within(dialog).getByLabelText('Current password'),
+      PASSWORD,
+    );
+    await user.type(
+      within(dialog).getByLabelText('New password'),
+      'Brand-new-pass-77',
+    );
+    await user.type(
+      within(dialog).getByLabelText('Confirm new password'),
+      'Brand-new-pass-7',
+    );
+    expect(
+      within(dialog).getByText('The new passwords don’t match.'),
+    ).toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText('Confirm new password'), '7');
+    await user.click(
+      within(dialog).getByRole('button', { name: 'Change password' }),
+    );
+    await waitFor(() => {
+      expect(
+        services.toasts.getState().toasts.map((toast) => toast.message),
+      ).toContain('Password changed.');
+    });
+
+    await user.click(screen.getByRole('button', { name: /Account: Ann Lee/ }));
+    await user.click(
+      screen.getByRole('menuitem', { name: 'Password & recovery' }),
+    );
+    const again = screen.getByRole('dialog', { name: 'Password & recovery' });
+    await user.type(
+      within(again).getByLabelText('Password'),
+      'Wrong-password-1',
+    );
+    await user.click(
+      within(again).getByRole('button', { name: 'Create new recovery code' }),
+    );
+    expect(
+      await within(again).findByText('Email or password is incorrect.'),
+    ).toBeInTheDocument();
+    await user.clear(within(again).getByLabelText('Password'));
+    await user.type(
+      within(again).getByLabelText('Password'),
+      'Brand-new-pass-77',
+    );
+    await user.click(
+      within(again).getByRole('button', { name: 'Create new recovery code' }),
+    );
+    expect(
+      await within(again).findByText(/^([0-9A-Z]{4}-){4}[0-9A-Z]{4}$/),
+    ).toHaveAccessibleName('Recovery code');
+    await user.click(
+      within(again).getByRole('button', { name: 'Download as text' }),
+    );
   });
 });

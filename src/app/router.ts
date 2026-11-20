@@ -9,6 +9,7 @@ export type Route =
   | { name: 'landing' }
   | { name: 'sign-in'; next: string }
   | { name: 'sign-up'; next: string }
+  | { name: 'reset-password'; email: string; code: string | null }
   | { name: 'projects'; search: string }
   | { name: 'studio'; documentId: string }
   | { name: 'sandbox' }
@@ -40,6 +41,13 @@ export function parseRoute(pathname: string, search: string): Route {
   }
   if (path === '/sign-in') {
     return { name: 'sign-in', next: safeNext(params.get('next')) };
+  }
+  if (path === '/reset-password') {
+    return {
+      name: 'reset-password',
+      email: (params.get('email') ?? '').slice(0, 254),
+      code: params.get('code')?.slice(0, 512) ?? null,
+    };
   }
   if (path === '/sign-up') {
     return { name: 'sign-up', next: safeNext(params.get('next')) };

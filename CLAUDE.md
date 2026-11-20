@@ -12,7 +12,7 @@ Local-first web app (static SPA on Vercel) for designing event graphics from tem
 - Runtime: Node 24 for tooling (pinned in `.nvmrc` and `package.json#volta`); runs in modern browsers
 - Frameworks: React 19, TypeScript 6 (TS 7 isn't supported by typescript-eslint yet), Vite 8, zustand, zod 4, lucide (icons), jsPDF (lazy). Rendering is React SVG (ADR 0009); no Konva
 - Storage: IndexedDB through Dexie: `canvas-studio-v2-accounts` (verifiers, wrapped keys, session) and one AES-GCM-sealed workspace DB per user (ADR 0010). Sync is a simulated `CloudTransport`; v1's Supabase tables are unused by v2
-- Auth: `IdentityProvider` port: device-local PBKDF2 accounts by default, Supabase Auth when `VITE_SUPABASE_*` are set (session in localStorage under `canvas-studio-auth`, ADR 0006)
+- Auth: `IdentityProvider` port: device-local PBKDF2 accounts by default, Supabase Auth when `VITE_SUPABASE_*` are set (session in localStorage under `canvas-studio-auth`, ADR 0006). Password reset goes through recovery codes that re-wrap the data key (ADR 0011)
 - Hosting: Vercel (`vercel.json`: headers, rewrites, caching); Supabase in Sydney (ap-southeast-2)
 
 ## Commands
@@ -73,6 +73,7 @@ Adapted from the portable steering kit the project was started with:
 - E2E specs run `page.evaluate` code in the browser, hence the separate `tsconfig.e2e.json` with DOM types.
 - Element `x,y` is the top-left of the unrotated box; rotation is about the centre (`rotate(r, cx, cy)`). Text height is derived from content (`withAutoHeight`), so never set it directly.
 - The app's own CSP blocks `fetch` of `blob:` URLs; read blobs directly.
+- Never change a password without re-wrapping the data key (`Keyring.changePassword` / `recover`); otherwise the workspace becomes unreadable. Server-side password updates run in `beforeCommit` so a failure leaves the keyring untouched.
 
 ## Sensitive areas
 

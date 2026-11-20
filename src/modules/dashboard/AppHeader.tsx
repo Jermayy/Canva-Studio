@@ -1,5 +1,6 @@
 import { BrandMark, Link } from '@/app/components/AppChrome';
 import { useSession, useWorkspace } from '@/app/services';
+import { SecurityDialog } from '@/modules/auth/components/SecurityDialog';
 import { SettingsDialog } from '@/modules/preferences/SettingsDialog';
 import { SyncIndicator } from '@/modules/sync/SyncIndicator';
 import { Menu } from '@/shared/ui/Menu';
@@ -18,6 +19,7 @@ export function AppHeader({ children }: { children?: ReactNode }) {
   const { session, signOut } = useSession();
   const { sync } = useWorkspace();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [securityOpen, setSecurityOpen] = useState(false);
   return (
     <header className="app-header">
       <Link to="/projects" aria-label="Projects">
@@ -52,6 +54,13 @@ export function AppHeader({ children }: { children?: ReactNode }) {
                 },
               },
               {
+                label: 'Password & recovery',
+                icon: 'shield',
+                onSelect: () => {
+                  setSecurityOpen(true);
+                },
+              },
+              {
                 label: 'Sign out',
                 icon: 'sign-out',
                 onSelect: () => {
@@ -62,6 +71,12 @@ export function AppHeader({ children }: { children?: ReactNode }) {
           />
         )}
       </div>
+      <SecurityDialog
+        open={securityOpen}
+        onClose={() => {
+          setSecurityOpen(false);
+        }}
+      />
       <SettingsDialog
         open={settingsOpen}
         onClose={() => {

@@ -19,6 +19,8 @@ export const REMEMBERED_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 export type AuthErrorCode =
   | 'invalid-credentials'
+  | 'invalid-recovery'
+  | 'reset-link-invalid'
   | 'email-taken'
   | 'weak-password'
   | 'locked'
@@ -29,6 +31,10 @@ export type AuthErrorCode =
 const MESSAGES: Record<AuthErrorCode, string> = {
   // Deliberately the same for "no such account" and "wrong password".
   'invalid-credentials': 'Email or password is incorrect.',
+  // Same message for unknown email, wrong code and missing code.
+  'invalid-recovery': 'Email or recovery code is incorrect.',
+  'reset-link-invalid':
+    'This reset link has expired or was already used. Request a new one.',
   'email-taken':
     'An account with this email already exists on this device. Sign in instead.',
   'weak-password': 'Choose a stronger password.',

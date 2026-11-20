@@ -14,6 +14,15 @@ async function signUp(page: Page) {
   await page.getByLabel('Email').fill(ACCOUNT.email);
   await page.getByLabel('Password', { exact: true }).fill(ACCOUNT.password);
   await page.getByRole('button', { name: 'Create account' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Save your recovery code' });
+  await expect(dialog.getByLabel('Recovery code', { exact: true })).toHaveText(
+    /^([0-9A-Z]{4}-){4}[0-9A-Z]{4}$/,
+  );
+  await dialog
+    .getByRole('checkbox', { name: /stored my recovery code/ })
+    .check();
+  await dialog.getByRole('button', { name: 'Continue' }).click();
+  await expect(dialog).toBeHidden();
   await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible();
 }
 

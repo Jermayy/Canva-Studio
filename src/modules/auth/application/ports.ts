@@ -22,11 +22,43 @@ export interface IdentityProvider {
   signOut: () => Promise<void>;
   /** The provider's own session, if it keeps one (Supabase does). */
   currentUserId: () => Promise<string | null>;
+  /** Device-local lookup for recovery-code resets; null when unknown or unsupported. */
+  findAccount: (email: string) => Promise<Identity | null>;
+  /** Replaces the password (Supabase: for the user of the current session). */
+  updatePassword: (userId: string, newPassword: string) => Promise<void>;
+  /** Supabase only: emails a reset link that returns to `/reset-password`. */
+  requestPasswordReset: (email: string) => Promise<void>;
+  /** Supabase only: turns the code from a reset link into a session. */
+  exchangeResetCode: (code: string) => Promise<Identity>;
 }
 
-/** Holds each account's workspace encryption key, wrapped by its password. */
+export interface UnlockResult {
+  dataKey: CryptoKey;
+  /** Set only when a recovery code was just created; show it once. */
+  recoveryCode: string | null;
+}
+
+/**
+ * Holds each account's workspace encryption key, wrapped twice: by the
+ * password and by a recovery code. `beforeCommit` runs after the old
+ * secret is proven and before anything is stored, so a failed password
+ * update elsewhere leaves the keyring untouched.
+ */
 export interface Keyring {
-  unlock: (userId: string, password: string) => Promise<CryptoKey>;
+  unlock: (userId: string, password: string) => Promise<UnlockResult>;
+  recover: (
+    userId: string,
+    recoveryCode: string,
+    newPassword: string,
+    beforeCommit?: () => Promise<void>,
+  ) => Promise<CryptoKey>;
+  changePassword: (
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+    beforeCommit?: () => Promise<void>,
+  ) => Promise<void>;
+  issueRecoveryCode: (userId: string, password: string) => Promise<string>;
 }
 
 export interface StoredSession {

@@ -37,6 +37,15 @@ export interface SupabaseAuthClient {
       options: { data: Record<string, string>; emailRedirectTo: string };
     }) => Promise<AuthResponse>;
     signOut: () => Promise<{ error: SupabaseError | null }>;
+    resetPasswordForEmail: (
+      email: string,
+      options: { redirectTo: string },
+    ) => Promise<{ error: SupabaseError | null }>;
+    exchangeCodeForSession: (code: string) => Promise<AuthResponse>;
+    updateUser: (attributes: { password: string }) => Promise<{
+      data: { user: SupabaseUser | null };
+      error: SupabaseError | null;
+    }>;
     getSession: () => Promise<{
       data: { session: { user: SupabaseUser } | null };
       error: SupabaseError | null;
@@ -75,6 +84,7 @@ function toIdentity(user: SupabaseUser, fallbackEmail: string): Identity {
 export function createSupabaseIdentityProvider(
   client: SupabaseAuthClient,
   redirectUrl: string,
+  resetRedirectUrl = redirectUrl,
 ): IdentityProvider {
   return {
     kind: 'supabase',
@@ -123,6 +133,39 @@ export function createSupabaseIdentityProvider(
     currentUserId: async () => {
       const { data } = await client.auth.getSession();
       return data.session?.user.id ?? null;
+    },
+
+    // Supabase resets go through its email link; there's no email lookup.
+    findAccount: () => Promise.resolve(null),
+
+    updatePassword: async (userId, newPassword) => {
+      const { data, error } = await client.auth.updateUser({
+        password: newPassword,
+      });
+      if (error) {
+        throw toAuthError(error);
+      }
+      if (data.user?.id !== userId) {
+        throw new AuthError('unknown');
+      }
+    },
+
+    requestPasswordReset: async (email) => {
+      const { error } = await client.auth.resetPasswordForEmail(email, {
+        redirectTo: resetRedirectUrl,
+      });
+      // Unknown emails succeed silently on Supabase, so nothing is revealed.
+      if (error) {
+        throw toAuthError(error);
+      }
+    },
+
+    exchangeResetCode: async (code) => {
+      const { data, error } = await client.auth.exchangeCodeForSession(code);
+      if (error || !data.user) {
+        throw new AuthError('reset-link-invalid');
+      }
+      return toIdentity(data.user, data.user.email ?? '');
     },
   };
 }

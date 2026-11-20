@@ -19,6 +19,7 @@ export function Dialog({
   footer,
   size = 'md',
   className,
+  dismissible = true,
 }: {
   open: boolean;
   onClose: () => void;
@@ -28,6 +29,8 @@ export function Dialog({
   footer?: ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl';
   className?: string;
+  /** False hides the close button (the dialog must be completed). */
+  dismissible?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -101,7 +104,9 @@ export function Dialog({
               </p>
             )}
           </div>
-          <IconButton icon="close" label="Close" onClick={onClose} />
+          {dismissible && (
+            <IconButton icon="close" label="Close" onClick={onClose} />
+          )}
         </header>
         <div className="dialog__body">{children}</div>
         {footer && <footer className="dialog__footer">{footer}</footer>}

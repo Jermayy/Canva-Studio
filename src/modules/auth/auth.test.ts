@@ -18,6 +18,11 @@ import {
   fieldErrors,
   signUpSchema,
 } from '@/modules/auth/domain/credentials';
+import {
+  formatRecoveryCode,
+  generateRecoveryCode,
+  normaliseRecoveryCode,
+} from '@/modules/auth/domain/recoveryCode';
 import { AccountsDatabase } from '@/modules/auth/infrastructure/accountsDatabase';
 import {
   createIndexedDbSessionVault,
@@ -178,12 +183,14 @@ describe('local identity provider + keyring', () => {
   it('unlocks the same data key with the right password only', async () => {
     const { keyring } = setup();
     const first = await keyring.unlock('user-1', PASSWORD);
-    expect(first.extractable).toBe(false);
-    const sealed = await sealJson(createAesGcmCipher(first), {
+    expect(first.dataKey.extractable).toBe(false);
+    expect(first.recoveryCode).toMatch(/^([0-9A-Z]{4}-){4}[0-9A-Z]{4}$/);
+    const sealed = await sealJson(createAesGcmCipher(first.dataKey), {
       hello: 'world',
     });
     const again = await keyring.unlock('user-1', PASSWORD);
-    expect(await openJson(createAesGcmCipher(again), sealed)).toEqual({
+    expect(again.recoveryCode).toBeNull();
+    expect(await openJson(createAesGcmCipher(again.dataKey), sealed)).toEqual({
       hello: 'world',
     });
     await expect(
@@ -245,6 +252,14 @@ describe('auth service', () => {
     ),
     signOut: vi.fn(() => Promise.resolve()),
     currentUserId: vi.fn(() => Promise.resolve(null)),
+    findAccount: vi.fn(() =>
+      Promise.resolve({ userId: 'u1', email: 'a@x.test', displayName: 'Ann' }),
+    ),
+    updatePassword: vi.fn(() => Promise.resolve()),
+    requestPasswordReset: vi.fn(() => Promise.resolve()),
+    exchangeResetCode: vi.fn(() =>
+      Promise.resolve({ userId: 'u1', email: 'a@x.test', displayName: 'Ann' }),
+    ),
     ...overrides,
   });
 
@@ -254,7 +269,29 @@ describe('auth service', () => {
       false,
       ['encrypt', 'decrypt'],
     );
-    const keyring: Keyring = { unlock: vi.fn(() => Promise.resolve(key)) };
+    const keyring: Keyring = {
+      unlock: vi.fn(() =>
+        Promise.resolve({ dataKey: key, recoveryCode: null }),
+      ),
+      recover: vi.fn(async (_userId, code: string, _password, beforeCommit) => {
+        if (code !== 'GOOD-CODE') {
+          throw new AuthError('invalid-recovery');
+        }
+        await beforeCommit?.();
+        return key;
+      }),
+      changePassword: vi.fn(
+        async (_userId, current: string, _next, beforeCommit) => {
+          if (current !== PASSWORD) {
+            throw new AuthError('invalid-credentials');
+          }
+          await beforeCommit?.();
+        },
+      ),
+      issueRecoveryCode: vi.fn(() =>
+        Promise.resolve('NEW0-CODE-0000-0000-0000'),
+      ),
+    };
     const vault = createMemorySessionVault();
     const service = createAuthService({
       identity,
@@ -269,7 +306,7 @@ describe('auth service', () => {
 
   it('signs in, unlocks the key and remembers the session for the chosen time', async () => {
     const { service, vault } = await setup();
-    const stored = await service.signIn({
+    const { stored } = await service.signIn({
       email: ' A@X.test ',
       password: PASSWORD,
       remember: false,
@@ -285,7 +322,9 @@ describe('auth service', () => {
       password: PASSWORD,
       remember: true,
     });
-    expect(remembered.session.expiresAt).toBe(NOW + REMEMBERED_SESSION_TTL_MS);
+    expect(remembered.stored.session.expiresAt).toBe(
+      NOW + REMEMBERED_SESSION_TTL_MS,
+    );
   });
 
   it('rejects blank input without calling the provider', async () => {
@@ -420,6 +459,194 @@ describe('auth service', () => {
     expect(await vault.load()).toBeNull();
   });
 
+  const session = {
+    userId: 'u1',
+    email: 'a@x.test',
+    displayName: 'Ann',
+    provider: 'local' as const,
+    expiresAt: NOW + 1,
+  };
+
+  it('resets with a recovery code, updates the password and signs in', async () => {
+    const { service, identity, vault } = await setup();
+    const result = await service.resetWithRecoveryCode({
+      email: ' A@X.test ',
+      recoveryCode: 'GOOD-CODE',
+      newPassword: 'Fresh-password-55',
+      remember: false,
+    });
+    expect(identity.findAccount).toHaveBeenCalledWith('a@x.test');
+    expect(identity.updatePassword).toHaveBeenCalledWith(
+      'u1',
+      'Fresh-password-55',
+    );
+    expect(result.recoveryCode).toBeNull();
+    expect(await vault.load()).toBe(result.stored);
+  });
+
+  it('gives one error for unknown emails and wrong codes, and throttles guesses', async () => {
+    const unknown = await setup(
+      identityFor({ findAccount: vi.fn(() => Promise.resolve(null)) }),
+    );
+    const input = {
+      email: 'a@x.test',
+      newPassword: 'Fresh-password-55',
+      remember: false,
+    };
+    await expect(
+      unknown.service.resetWithRecoveryCode({
+        ...input,
+        recoveryCode: 'GOOD-CODE',
+      }),
+    ).rejects.toMatchObject({ code: 'invalid-recovery' });
+
+    const { service, identity } = await setup();
+    for (let attempt = 0; attempt < FREE_ATTEMPTS; attempt += 1) {
+      await expect(
+        service.resetWithRecoveryCode({ ...input, recoveryCode: 'BAD' }),
+      ).rejects.toMatchObject({
+        code: 'invalid-recovery',
+      });
+    }
+    await expect(
+      service.resetWithRecoveryCode({ ...input, recoveryCode: 'GOOD-CODE' }),
+    ).rejects.toMatchObject({
+      code: 'locked',
+    });
+    expect(identity.updatePassword).not.toHaveBeenCalled();
+  });
+
+  it('refuses weak new passwords and invalid emails before doing any work', async () => {
+    const { service, identity } = await setup();
+    await expect(
+      service.resetWithRecoveryCode({
+        email: 'a@x.test',
+        recoveryCode: 'GOOD-CODE',
+        newPassword: 'short',
+        remember: false,
+      }),
+    ).rejects.toMatchObject({ code: 'weak-password' });
+    await expect(
+      service.resetWithRecoveryCode({
+        email: 'nope',
+        recoveryCode: 'GOOD-CODE',
+        newPassword: 'Fresh-password-55',
+        remember: false,
+      }),
+    ).rejects.toMatchObject({ code: 'invalid-recovery' });
+    expect(identity.findAccount).not.toHaveBeenCalled();
+  });
+
+  it('wraps unexpected reset failures', async () => {
+    const { service } = await setup(
+      identityFor({
+        findAccount: vi.fn(() => Promise.reject(new Error('db'))),
+      }),
+    );
+    await expect(
+      service.resetWithRecoveryCode({
+        email: 'a@x.test',
+        recoveryCode: 'GOOD-CODE',
+        newPassword: 'Fresh-password-55',
+        remember: false,
+      }),
+    ).rejects.toMatchObject({ code: 'unknown' });
+  });
+
+  it('sends reset emails and completes them with the recovery code', async () => {
+    const { service, identity } = await setup(
+      identityFor({ kind: 'supabase' }),
+    );
+    await service.requestResetEmail(' A@X.test ');
+    expect(identity.requestPasswordReset).toHaveBeenCalledWith('a@x.test');
+    await expect(service.requestResetEmail('nope')).rejects.toBeInstanceOf(
+      AuthError,
+    );
+
+    const result = await service.completeEmailReset({
+      code: 'link-code',
+      recoveryCode: 'GOOD-CODE',
+      newPassword: 'Fresh-password-55',
+      remember: true,
+    });
+    expect(identity.exchangeResetCode).toHaveBeenCalledWith('link-code');
+    expect(identity.updatePassword).toHaveBeenCalledWith(
+      'u1',
+      'Fresh-password-55',
+    );
+    expect(result.stored.session.provider).toBe('supabase');
+
+    vi.mocked(identity.updatePassword).mockClear();
+    await expect(
+      service.completeEmailReset({
+        code: 'link-code',
+        recoveryCode: 'BAD',
+        newPassword: 'Fresh-password-55',
+        remember: true,
+      }),
+    ).rejects.toMatchObject({ code: 'invalid-recovery' });
+    expect(identity.updatePassword).not.toHaveBeenCalled();
+
+    vi.mocked(identity.requestPasswordReset).mockRejectedValueOnce(
+      new Error('smtp'),
+    );
+    await expect(service.requestResetEmail('a@x.test')).rejects.toMatchObject({
+      code: 'unknown',
+    });
+  });
+
+  it('changes the password only after proving the current one', async () => {
+    const { service, identity } = await setup();
+    await service.changePassword({
+      session,
+      currentPassword: PASSWORD,
+      newPassword: 'Fresh-password-55',
+    });
+    expect(identity.signIn).toHaveBeenCalledWith('a@x.test', PASSWORD);
+    expect(identity.updatePassword).toHaveBeenCalledWith(
+      'u1',
+      'Fresh-password-55',
+    );
+    await expect(
+      service.changePassword({
+        session,
+        currentPassword: PASSWORD,
+        newPassword: 'weak',
+      }),
+    ).rejects.toMatchObject({ code: 'weak-password' });
+
+    const wrong = await setup(
+      identityFor({
+        signIn: vi.fn(() =>
+          Promise.reject(new AuthError('invalid-credentials')),
+        ),
+      }),
+    );
+    await expect(
+      wrong.service.changePassword({
+        session,
+        currentPassword: 'Wrong-pass-1',
+        newPassword: 'Fresh-password-55',
+      }),
+    ).rejects.toMatchObject({ code: 'invalid-credentials' });
+    expect(wrong.identity.updatePassword).not.toHaveBeenCalled();
+  });
+
+  it('issues a new recovery code', async () => {
+    const { service, keyring } = await setup();
+    expect(
+      await service.issueRecoveryCode({ session, password: PASSWORD }),
+    ).toBe('NEW0-CODE-0000-0000-0000');
+    vi.mocked(keyring.issueRecoveryCode).mockRejectedValueOnce(
+      new AuthError('invalid-credentials'),
+    );
+    await expect(
+      service.issueRecoveryCode({ session, password: 'x' }),
+    ).rejects.toMatchObject({
+      code: 'invalid-credentials',
+    });
+  });
+
   it('treats a broken vault as signed out', async () => {
     const { service, vault } = await setup();
     vault.load = () => Promise.reject(new Error('corrupt'));
@@ -446,6 +673,13 @@ describe('Supabase identity provider', () => {
           Promise.resolve({ data: { user, session: {} }, error: null }),
         ),
         signOut: vi.fn(() => Promise.resolve({ error: null })),
+        resetPasswordForEmail: vi.fn(() => Promise.resolve({ error: null })),
+        exchangeCodeForSession: vi.fn(() =>
+          Promise.resolve({ data: { user, session: {} }, error: null }),
+        ),
+        updateUser: vi.fn(() =>
+          Promise.resolve({ data: { user }, error: null }),
+        ),
         getSession: vi.fn(() =>
           Promise.resolve({ data: { session: { user } }, error: null }),
         ),
@@ -555,6 +789,57 @@ describe('Supabase identity provider', () => {
     });
   });
 
+  it('resets passwords through the emailed link', async () => {
+    const auth = client();
+    const provider = createSupabaseIdentityProvider(
+      auth,
+      'https://app/sign-in',
+      'https://app/reset-password',
+    );
+    await provider.requestPasswordReset('a@x.test');
+    expect(auth.auth.resetPasswordForEmail).toHaveBeenCalledWith('a@x.test', {
+      redirectTo: 'https://app/reset-password',
+    });
+    expect(await provider.exchangeResetCode('code')).toMatchObject({
+      userId: 'sb-1',
+    });
+    await provider.updatePassword('sb-1', PASSWORD);
+    expect(auth.auth.updateUser).toHaveBeenCalledWith({ password: PASSWORD });
+    await expect(
+      provider.updatePassword('someone-else', PASSWORD),
+    ).rejects.toBeInstanceOf(AuthError);
+    expect(await provider.findAccount('a@x.test')).toBeNull();
+  });
+
+  it('maps reset failures', async () => {
+    const provider = createSupabaseIdentityProvider(
+      client({
+        resetPasswordForEmail: () =>
+          Promise.resolve({ error: { status: 429, message: 'slow down' } }),
+        exchangeCodeForSession: () =>
+          Promise.resolve({
+            data: { user: null, session: null },
+            error: { status: 400, message: 'expired' },
+          }),
+        updateUser: () =>
+          Promise.resolve({
+            data: { user: null },
+            error: { status: 422, code: 'weak_password', message: 'weak' },
+          }),
+      }),
+      '',
+    );
+    await expect(
+      provider.requestPasswordReset('a@x.test'),
+    ).rejects.toMatchObject({ code: 'rate-limited' });
+    await expect(provider.exchangeResetCode('old')).rejects.toMatchObject({
+      code: 'reset-link-invalid',
+    });
+    await expect(provider.updatePassword('sb-1', 'x')).rejects.toMatchObject({
+      code: 'weak-password',
+    });
+  });
+
   it('surfaces sign-out errors', async () => {
     const provider = createSupabaseIdentityProvider(
       client({
@@ -564,5 +849,174 @@ describe('Supabase identity provider', () => {
       '',
     );
     await expect(provider.signOut()).rejects.toBeInstanceOf(AuthError);
+  });
+});
+
+describe('recovery codes', () => {
+  it('generates five groups of four from an unambiguous alphabet', () => {
+    const code = generateRecoveryCode();
+    expect(code).toMatch(/^([0-9A-HJKMNP-TV-Z]{4}-){4}[0-9A-HJKMNP-TV-Z]{4}$/);
+    expect(generateRecoveryCode()).not.toBe(code);
+    expect(generateRecoveryCode((bytes) => bytes.fill(255))).toBe(
+      'ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ',
+    );
+    expect(formatRecoveryCode('ABCDEFGH')).toBe('ABCD-EFGH');
+  });
+
+  it('accepts sloppy input but rejects impossible codes', () => {
+    expect(normaliseRecoveryCode(' abcd-efgh ijkm-np0o-il00 ')).toBe(
+      'ABCDEFGH1JKMNP001100',
+    );
+    expect(normaliseRecoveryCode('ABCD-EFGH')).toBeNull();
+    expect(normaliseRecoveryCode('UUUU-UUUU-UUUU-UUUU-UUUU')).toBeNull();
+  });
+});
+
+describe('keyring recovery', () => {
+  const NEW_PASSWORD = 'Brand-new-pass-77';
+
+  function setup() {
+    const db = freshAccounts();
+    return { db, keyring: createKeyring({ db, iterations: ITERATIONS }) };
+  }
+
+  async function sealedWith(key: CryptoKey) {
+    return sealJson(createAesGcmCipher(key), { design: 'kept' });
+  }
+
+  it('resets the password with the recovery code and keeps the same data key', async () => {
+    const { keyring } = setup();
+    const created = await keyring.unlock('u', PASSWORD);
+    const sealed = await sealedWith(created.dataKey);
+    const commit = vi.fn(() => Promise.resolve());
+    const code = (created.recoveryCode ?? '').toLowerCase().replace(/-/g, ' ');
+    const recovered = await keyring.recover('u', code, NEW_PASSWORD, commit);
+    expect(commit).toHaveBeenCalled();
+    expect(recovered.extractable).toBe(false);
+    expect(await openJson(createAesGcmCipher(recovered), sealed)).toEqual({
+      design: 'kept',
+    });
+    await expect(keyring.unlock('u', PASSWORD)).rejects.toMatchObject({
+      code: 'invalid-credentials',
+    });
+    const unlocked = await keyring.unlock('u', NEW_PASSWORD);
+    expect(
+      await openJson(createAesGcmCipher(unlocked.dataKey), sealed),
+    ).toEqual({ design: 'kept' });
+  });
+
+  it('rejects a wrong, malformed or missing recovery code without changing anything', async () => {
+    const { keyring } = setup();
+    await keyring.unlock('u', PASSWORD);
+    const commit = vi.fn(() => Promise.resolve());
+    await expect(
+      keyring.recover('u', generateRecoveryCode(), NEW_PASSWORD, commit),
+    ).rejects.toMatchObject({
+      code: 'invalid-recovery',
+    });
+    await expect(
+      keyring.recover('u', 'nope', NEW_PASSWORD),
+    ).rejects.toMatchObject({ code: 'invalid-recovery' });
+    await expect(
+      keyring.recover('ghost', generateRecoveryCode(), NEW_PASSWORD),
+    ).rejects.toMatchObject({
+      code: 'invalid-recovery',
+    });
+    expect(commit).not.toHaveBeenCalled();
+    await expect(keyring.unlock('u', PASSWORD)).resolves.toBeDefined();
+  });
+
+  it('leaves the keyring untouched if the password update elsewhere fails', async () => {
+    const { keyring } = setup();
+    const { recoveryCode } = await keyring.unlock('u', PASSWORD);
+    await expect(
+      keyring.recover('u', recoveryCode ?? '', NEW_PASSWORD, () =>
+        Promise.reject(new Error('server down')),
+      ),
+    ).rejects.toThrow('server down');
+    await expect(keyring.unlock('u', PASSWORD)).resolves.toBeDefined();
+  });
+
+  it('changes the password and issues replacement codes', async () => {
+    const { keyring } = setup();
+    const { recoveryCode: original } = await keyring.unlock('u', PASSWORD);
+    await expect(
+      keyring.changePassword('u', 'Wrong-pass-1', NEW_PASSWORD),
+    ).rejects.toMatchObject({
+      code: 'invalid-credentials',
+    });
+    await keyring.changePassword('u', PASSWORD, NEW_PASSWORD);
+    await expect(keyring.unlock('u', NEW_PASSWORD)).resolves.toBeDefined();
+
+    const replacement = await keyring.issueRecoveryCode('u', NEW_PASSWORD);
+    await expect(
+      keyring.recover('u', original ?? '', PASSWORD),
+    ).rejects.toMatchObject({ code: 'invalid-recovery' });
+    await expect(
+      keyring.recover('u', replacement, PASSWORD),
+    ).resolves.toBeDefined();
+    await expect(
+      keyring.issueRecoveryCode('ghost', PASSWORD),
+    ).rejects.toBeInstanceOf(AuthError);
+    await expect(
+      keyring.changePassword('ghost', PASSWORD, NEW_PASSWORD),
+    ).rejects.toBeInstanceOf(AuthError);
+  });
+
+  it('issues a code to older accounts that never had one', async () => {
+    const { db, keyring } = setup();
+    await keyring.unlock('u', PASSWORD);
+    const row = await db.keys.get('u');
+    await db.keys.put({
+      ...row,
+      userId: 'u',
+      salt: row?.salt ?? '',
+      iterations: row?.iterations ?? 0,
+      iv: row?.iv ?? '',
+      wrapped: row?.wrapped ?? '',
+      recovery: undefined,
+    });
+    const upgraded = await keyring.unlock('u', PASSWORD);
+    expect(upgraded.recoveryCode).not.toBeNull();
+    expect((await keyring.unlock('u', PASSWORD)).recoveryCode).toBeNull();
+  });
+});
+
+describe('local identity provider password updates', () => {
+  it('finds accounts by email and replaces the verifier', async () => {
+    const db = freshAccounts();
+    const identity = createLocalIdentityProvider({
+      db,
+      createId: () => 'u',
+      now: () => NOW,
+      iterations: ITERATIONS,
+    });
+    await identity.signUp({
+      email: 'a@x.test',
+      password: PASSWORD,
+      displayName: 'Ann',
+    });
+    expect(await identity.findAccount('a@x.test')).toEqual({
+      userId: 'u',
+      email: 'a@x.test',
+      displayName: 'Ann',
+    });
+    expect(await identity.findAccount('ghost@x.test')).toBeNull();
+    await identity.updatePassword('u', 'Another-pass-99');
+    await expect(identity.signIn('a@x.test', PASSWORD)).rejects.toBeInstanceOf(
+      AuthError,
+    );
+    await expect(
+      identity.signIn('a@x.test', 'Another-pass-99'),
+    ).resolves.toMatchObject({ userId: 'u' });
+    await expect(
+      identity.updatePassword('ghost', 'Another-pass-99'),
+    ).rejects.toBeInstanceOf(AuthError);
+    await expect(
+      identity.requestPasswordReset('a@x.test'),
+    ).rejects.toBeInstanceOf(AuthError);
+    await expect(identity.exchangeResetCode('code')).rejects.toMatchObject({
+      code: 'reset-link-invalid',
+    });
   });
 });

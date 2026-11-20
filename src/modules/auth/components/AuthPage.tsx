@@ -1,6 +1,6 @@
 import { BrandMark, Link } from '@/app/components/AppChrome';
 import { useServices } from '@/app/services';
-import type { StoredSession } from '@/modules/auth/application/ports';
+import type { AuthSuccess } from '@/modules/auth/application/authService';
 import { PasswordStrength } from '@/modules/auth/components/PasswordStrength';
 import { AuthError, formatRetryAfter } from '@/modules/auth/domain/authModel';
 import {
@@ -62,7 +62,7 @@ export function AuthPage({
 }: {
   mode: Mode;
   next: string;
-  onAuthenticated: (stored: StoredSession) => void;
+  onAuthenticated: (success: AuthSuccess) => void;
 }) {
   const { auth } = useServices();
   const [displayName, setDisplayName] = useState('');
@@ -108,7 +108,7 @@ export function AuthPage({
           setConfirmationSentTo(result.email);
           return;
         }
-        onAuthenticated(result.session);
+        onAuthenticated(result);
       } else {
         onAuthenticated(await auth.signIn({ email, password, remember }));
       }
@@ -253,6 +253,14 @@ export function AuthPage({
                 />
                 {isSignUp && (
                   <PasswordStrength password={password} email={email} />
+                )}
+                {!isSignUp && (
+                  <Link
+                    to={`/reset-password${email ? `?email=${encodeURIComponent(email.trim())}` : ''}`}
+                    className="auth-form__forgot"
+                  >
+                    Forgot password?
+                  </Link>
                 )}
                 <label className="checkbox">
                   <input

@@ -17,12 +17,17 @@ export interface LocalAccountRow {
   createdAt: string;
 }
 
-export interface WrappedKeyRow {
-  userId: string;
+export interface WrappedKey {
   salt: string;
   iterations: number;
   iv: string;
   wrapped: string;
+}
+
+/** The data key wrapped by the password, and (since v2.1) by a recovery code. */
+export interface WrappedKeyRow extends WrappedKey {
+  userId: string;
+  recovery?: WrappedKey;
 }
 
 export interface SessionRow {

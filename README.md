@@ -12,6 +12,7 @@ Event graphics shouldn't need an install, a subscription or a design degree, and
 
 - **Secure accounts.** Device-local accounts (PBKDF2-SHA256, 600k iterations; throttled after 5 failed attempts; generic errors) or Supabase Auth when configured. Sessions last 12 hours, or 30 days with "keep me signed in", and an open tab signs out when its session expires.
 - **Encrypted workspaces.** Every design and uploaded image is sealed with AES-256-GCM using a per-account key that only your password unlocks (ADR 0010).
+- **Password reset that keeps your designs.** Each account gets a one-time recovery code at sign-up; "Forgot password?" takes your email, the code and a new password and re-encrypts the key, so nothing is lost. Signed in, **Password & recovery** changes the password or issues a new code (ADR 0011). With Supabase, the reset starts from an emailed link.
 - **Sandbox, no account needed.** The full editor from the landing page, offline-capable. Nothing is saved, and the UI says so (banner, "Not saved" chip, leave-page warning).
 - **Projects dashboard.** Filter by template type, date created and last edited; search and sort; grid or list view. Filters live in the URL. Rename, duplicate, and delete with undo.
 - **Templates and formats.** 10 templates across birthday, Christmas, wedding, corporate, conference and party, plus blank canvases in 8 formats (A4, Letter, 5×7 invitation, square, portrait, story, 16:9 slide, web banner).
@@ -59,7 +60,7 @@ The v1 migrations in `supabase/migrations/` (designs, share links, account delet
 
 ## Tests
 
-- **Unit and component (Vitest + Testing Library):** 218 tests across the domain, stores, crypto, auth, sync and export pipeline, plus full-screen flows (sign-up → dashboard → studio, canvas gestures, keyboard shortcuts, export/share dialogs). Coverage thresholds: domain/application/state/data ≥ 90% lines, components ≥ 70%.
+- **Unit and component (Vitest + Testing Library):** 237 tests across the domain, stores, crypto, auth, sync and export pipeline, plus full-screen flows (sign-up → dashboard → studio, canvas gestures, keyboard shortcuts, export/share dialogs). Coverage thresholds: domain/application/state/data ≥ 90% lines, components ≥ 70%.
 - **End to end (Playwright, production build):** the sandbox exports real PNG, JPEG, SVG and PDF files (signatures checked); sign-up → edit → hidden-tab flush → reload → ciphertext-only IndexedDB → filters; strict CSP with no console errors. Against a deployment, `E2E_BASE_URL=https://<preview-url> npm run test:e2e` also checks the HTTP security headers.
 - **Database (v1):** `supabase/tests/*.test.sql` on plain Postgres with Supabase stand-ins. Locally: `docker run --rm -d -p 5432:5432 -e POSTGRES_HOST_AUTH_METHOD=trust postgres:17 && npm run test:db`.
 
@@ -117,11 +118,11 @@ docs/                   Architecture, ADRs, runbooks, v2 overview
 
 ## Architecture
 
-See [docs/architecture.md](docs/architecture.md) and [docs/adr/](docs/adr/): one SVG renderer for everything ([ADR 0009](docs/adr/0009-svg-renderer-for-editor-and-exports.md)); encrypted workspaces, device-local accounts and simulated sync ([ADR 0010](docs/adr/0010-encrypted-local-workspaces-and-simulated-sync.md)). The v1 decisions (ADRs 0001–0008) are kept for history.
+See [docs/architecture.md](docs/architecture.md) and [docs/adr/](docs/adr/): one SVG renderer for everything ([ADR 0009](docs/adr/0009-svg-renderer-for-editor-and-exports.md)); encrypted workspaces, device-local accounts and simulated sync ([ADR 0010](docs/adr/0010-encrypted-local-workspaces-and-simulated-sync.md)); password reset with recovery codes ([ADR 0011](docs/adr/0011-password-reset-with-recovery-codes.md)). The v1 decisions (ADRs 0001–0008) are kept for history.
 
 ## Data and privacy
 
-- **In this browser:** device-local accounts (email, name, salted password verifier, wrapped key), the current session, and your designs and images, encrypted with your account key. Interface preferences and sign-in throttling counters are in localStorage.
+- **In this browser:** device-local accounts (email, name, salted password verifier, and the data key wrapped by your password and by your recovery code; never the code itself), the current session, and your designs and images, encrypted with your account key. Interface preferences and sign-in throttling counters are in localStorage.
 - **Leaves the device:** nothing, with device-local accounts. With Supabase configured, your email, name and password hash are handled by Supabase Auth in Sydney. Cloud sync in v2 is simulated and sends nothing.
 - **Sandbox:** nothing is stored; closing the tab discards the design.
 - **No analytics or tracking.**
@@ -129,7 +130,7 @@ See [docs/architecture.md](docs/architecture.md) and [docs/adr/](docs/adr/): one
 ## Known gaps
 
 - **Cloud sync is simulated.** Designs don't roam between devices yet; a Supabase `CloudTransport` is the next step (ADR 0010).
-- **No password reset or recovery key.** A forgotten password means a lost workspace; recovery needs a design first (ADR 0010).
+- **Lost password and lost recovery code** means the encrypted workspace can't be recovered (by design, ADR 0011). The Supabase email-reset path is tested with fakes only; smoke-test it in staging.
 - **PDF is raster inside a vector page** (up to 384 dpi), not native vector.
 - **System fonts only** (CSP), so typography can vary slightly between operating systems.
 - **v1 data isn't migrated.** v2 uses new database names, so v1 browser data won't appear. View-only share links from v1 aren't in v2.

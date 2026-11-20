@@ -8,7 +8,7 @@ Branch: `feature-canvas-studio-v2`, built fresh from `main` (v1). This page summ
 | --------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Rendering       | Konva (HTML canvas)                  | One React SVG renderer for editor, thumbnails and exports (ADR 0009)                                                                                                                                          |
 | Export          | PDF, PNG                             | PDF, PNG, JPEG, **SVG (vector)**; 1–4× scale with dpi readout; JPEG quality; transparent PNG/SVG; custom, validated file names                                                                                |
-| Sign-in         | Supabase only (or offline guest)     | Pluggable: device-local accounts (PBKDF2 + throttling) or Supabase Auth                                                                                                                                       |
+| Sign-in         | Supabase only (or offline guest)     | Pluggable: device-local accounts (PBKDF2 + throttling) or Supabase Auth; **password reset with recovery codes** that keeps encrypted designs (ADR 0011)                                                       |
 | Data at rest    | Plain IndexedDB                      | **AES-256-GCM envelope encryption** per account (ADR 0010)                                                                                                                                                    |
 | No-account mode | Guest mode, saved locally            | **Sandbox**: full editor, nothing saved, clearly signposted                                                                                                                                                   |
 | Sync            | Real Supabase sync + realtime        | Sync engine with a **simulated** transport (per the brief); status chip, offline, retry/backoff                                                                                                               |
@@ -39,14 +39,14 @@ Design principles in practice:
 
 ## What was verified
 
-- `npm run check`: Prettier, ESLint (strict, type-aware), TypeScript (strict), 218 Vitest tests with coverage thresholds (domain/state/data/application ≥ 90% lines, components ≥ 70%) all pass.
+- `npm run check`: Prettier, ESLint (strict, type-aware), TypeScript (strict), 237 Vitest tests with coverage thresholds (domain/state/data/application ≥ 90% lines, components ≥ 70%) all pass.
 - `npm run test:e2e` (Playwright, production build): sandbox → real PNG, JPEG, SVG and PDF downloads with checked file signatures; sign-up → edit → hidden-tab flush → reload → ciphertext-only IndexedDB → dashboard filters; strict CSP; no console errors.
 - Manual check in Chrome (dev server): landing, sandbox, drag/resize/undo, export of all four formats (PNG checked visually), sign-up with inline validation, encrypted reload, filters/search, save/sync chips, command palette, light theme with teal accent.
 
 ## Known gaps and trade-offs
 
 - Cloud sync is **simulated** (by request). Designs don't roam between devices yet.
-- **No password reset or recovery key**: a forgotten password means a lost workspace (ADR 0010).
+- **Password reset needs the recovery code** (ADR 0011): losing both the password and the code still means a lost workspace, by design. The Supabase email-reset path is unit-tested with fakes only.
 - PDF is a high-resolution raster inside a vector page, not native vector.
 - System fonts only (CSP), so typography can vary slightly between operating systems.
 - Mobile layout works but is tuned for tablet and desktop. Touch gestures (pinch-zoom on the canvas) are basic.
@@ -61,7 +61,7 @@ Design principles in practice:
    - _Supabase Auth:_ keep the vars. Confirm email confirmation and Site URL / redirect allow-list for `/sign-in` (the runbook lists the dashboard settings). v1's tables are unused by v2 but harmless.
 3. **Tell existing v1 users.** v2 uses new database names, so v1 designs saved in the browser won't appear. Either announce it, or ask for a one-off importer (v1 IndexedDB → v2 encrypted workspace) before launch.
 4. **Update the privacy wording** if you choose Supabase Auth or add analytics. The landing page currently says designs never leave the device and that sync is simulated.
-5. **Before real users:** add a recovery key or a re-wrap-on-reset flow (then password reset), and an error tracker (the open playbook question on vendor).
+5. **Before real users:** add an error tracker (the open playbook question on vendor). If you use Supabase, add `/reset-password` to the redirect allow-list and smoke-test the email reset in staging (ADR 0011).
 6. **When ready for real sync:** implement `CloudTransport` against Supabase with ciphertext-only rows and v1-style version conflicts. The UI needs no changes.
 7. **Smoke-test the preview deployment** (`E2E_BASE_URL=<preview> npm run test:e2e` also checks the security headers), then promote.
 
