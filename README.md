@@ -142,6 +142,12 @@ See [docs/architecture.md](docs/architecture.md) and [docs/adr/](docs/adr/). The
 
 Every pull request updates this README to match the change (features, setup, configuration, structure, known gaps). CI's **README** check fails a PR that doesn't touch it; add the `skip-readme` label only when there's genuinely nothing to document. Dependabot PRs are exempt.
 
+`main` is protected: changes land through a pull request with the `check`, `database`, `e2e` and `readme-updated` checks green and the branch up to date; force-pushes and deletion are blocked, for admins too.
+
+## Security
+
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md) (GitHub private vulnerability reporting), not in a public issue.
+
 ## Standards
 
 Follows the engineering playbook (`~/Coding Projects/engineering-playbook`).
