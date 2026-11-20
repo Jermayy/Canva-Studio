@@ -1,410 +1,205 @@
-import type { AssetRepository } from '@/modules/designs/data/assetRepository';
-import type { DesignRecord } from '@/modules/designs/data/localDb';
-import type { LocalDesignRepository } from '@/modules/designs/data/localDesignRepository';
-import {
-  NewerSchemaVersionError,
-  safeParseDesignDocument,
-  upgradeDesignDocument,
-} from '@/modules/editor/domain/designModel';
-import { referencedAssetIds } from '@/modules/editor/domain/documentOps';
-import type {
-  PullCursor,
-  RemoteDesign,
-  RemoteDesignStore,
-  RemoteDesignWrite,
-} from '@/modules/sync/remoteDesignStore';
+import type { DesignDocument } from '@/modules/document/domain/schema';
 import type { Logger } from '@/shared/logger';
-
-export type SyncStatus =
-  | { state: 'offline' }
-  | { state: 'syncing' }
-  | { state: 'idle'; lastSyncedAt: number; live: boolean }
-  | { state: 'error'; message: string }
-  /** The cloud has designs from a newer app version; reload to update. */
-  | { state: 'update-required' };
-
-export interface SyncEngineDeps {
-  local: LocalDesignRepository;
-  assets: AssetRepository;
-  remote: RemoteDesignStore;
-  isOnline: () => boolean;
-  logger: Logger;
-  now?: () => number;
-  /** Fallback polling when realtime is unavailable. */
-  pollIntervalMs?: number;
-  /** Delay that batches bursts of local edits into one push. */
-  debounceMs?: number;
-  pageSize?: number;
-  /**
-   * Runs one sync pass exclusively across browser tabs that share this
-   * local database (see `crossTabExclusive`). Defaults to running directly.
-   */
-  runExclusive?: <T>(task: () => Promise<T>) => Promise<T>;
-}
-
-const CURSOR_KEY = 'pull-cursor';
-const CONFLICT_SUFFIX = ' (conflicted copy)';
-const CURSOR_OVERLAP_MS = 5_000;
+import { createStore, type StoreApi } from 'zustand/vanilla';
 
 /**
- * Keeps the local database and the cloud in step.
+ * Background cloud sync behind a transport port. v2 ships with a
+ * simulated transport (realistic latency, offline detection, occasional
+ * failures) so the sync UX is real while the backend is out of scope; a
+ * Supabase transport can replace it without touching the UI.
  *
- * - Local edits are pushed with optimistic concurrency (expected version).
- * - Remote changes are pulled by a keyset cursor on server time.
- * - On a conflict, the server copy wins and the local edit is kept as a
- *   separate "conflicted copy" design, so no work is ever lost.
- * - Realtime notifications trigger a pull; polling covers missed events
- *   and periods when the socket is down.
+ * Only the latest version of each document is queued, and failures retry
+ * with exponential backoff.
  */
-export class SyncEngine {
-  private readonly now: () => number;
-  private readonly pollIntervalMs: number;
-  private readonly debounceMs: number;
-  private readonly pageSize: number;
-  private readonly statusListeners = new Set<(status: SyncStatus) => void>();
-  private readonly remoteListeners = new Set<(ids: string[]) => void>();
-  private status: SyncStatus = { state: 'offline' };
-  private running: Promise<void> | null = null;
-  private rerunRequested = false;
-  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
-  private unsubscribeRealtime: (() => void) | null = null;
-  private realtimeLive = false;
 
-  constructor(private readonly deps: SyncEngineDeps) {
-    this.now = deps.now ?? Date.now;
-    this.pollIntervalMs = deps.pollIntervalMs ?? 30_000;
-    this.debounceMs = deps.debounceMs ?? 1_500;
-    this.pageSize = deps.pageSize ?? 100;
+export interface CloudTransport {
+  push: (document: DesignDocument) => Promise<void>;
+}
+
+export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'error';
+
+export interface SyncState {
+  status: SyncStatus;
+  pending: number;
+  lastSyncedAt: number | null;
+  lastError: string | null;
+}
+
+export interface SyncEngine {
+  store: StoreApi<SyncState>;
+  enqueue: (document: DesignDocument) => void;
+  retryNow: () => void;
+  dispose: () => void;
+}
+
+export class CloudUnavailableError extends Error {
+  constructor(message = 'Cloud sync is unavailable') {
+    super(message);
+    this.name = 'CloudUnavailableError';
   }
+}
 
-  start(): void {
-    if (this.pollTimer) {
+export interface Connectivity {
+  isOnline: () => boolean;
+  subscribe: (onChange: () => void) => () => void;
+}
+
+export function browserConnectivity(target: Window = window): Connectivity {
+  return {
+    isOnline: () => target.navigator.onLine,
+    subscribe: (onChange) => {
+      target.addEventListener('online', onChange);
+      target.addEventListener('offline', onChange);
+      return () => {
+        target.removeEventListener('online', onChange);
+        target.removeEventListener('offline', onChange);
+      };
+    },
+  };
+}
+
+export function createSimulatedCloud(options: {
+  connectivity: Connectivity;
+  random?: () => number;
+  minLatencyMs?: number;
+  maxLatencyMs?: number;
+  failureRate?: number;
+}): CloudTransport {
+  const random = options.random ?? Math.random;
+  const min = options.minLatencyMs ?? 350;
+  const max = options.maxLatencyMs ?? 1100;
+  const failureRate = options.failureRate ?? 0.05;
+  return {
+    push: () =>
+      new Promise((resolve, reject) => {
+        if (!options.connectivity.isOnline()) {
+          reject(new CloudUnavailableError('You’re offline'));
+          return;
+        }
+        const latency = min + random() * (max - min);
+        setTimeout(() => {
+          if (random() < failureRate) {
+            reject(
+              new CloudUnavailableError('The sync service didn’t respond'),
+            );
+          } else {
+            resolve();
+          }
+        }, latency);
+      }),
+  };
+}
+
+export function createSyncEngine(deps: {
+  transport: CloudTransport;
+  connectivity: Connectivity;
+  now: () => number;
+  logger: Logger;
+  retryBaseMs?: number;
+  maxRetryMs?: number;
+}): SyncEngine {
+  const retryBase = deps.retryBaseMs ?? 2000;
+  const maxRetry = deps.maxRetryMs ?? 30_000;
+  const queue = new Map<string, DesignDocument>();
+  let running = false;
+  let attempt = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let disposed = false;
+
+  const store = createStore<SyncState>()(() => ({
+    status: deps.connectivity.isOnline() ? 'synced' : 'offline',
+    pending: 0,
+    lastSyncedAt: null,
+    lastError: null,
+  }));
+
+  const updatePending = () => {
+    store.setState({ pending: queue.size });
+  };
+
+  const scheduleRetry = () => {
+    clearTimeout(retryTimer);
+    const wait = Math.min(maxRetry, retryBase * 2 ** attempt);
+    attempt += 1;
+    retryTimer = setTimeout(() => {
+      void run();
+    }, wait);
+  };
+
+  async function run(): Promise<void> {
+    if (running || disposed) {
       return;
     }
-    this.unsubscribeRealtime = this.deps.remote.subscribe(
-      () => {
-        this.requestSync(0);
-      },
-      (status) => {
-        this.realtimeLive = status === 'connected';
-        if (this.status.state === 'idle') {
-          this.setStatus({ ...this.status, live: this.realtimeLive });
-        }
-        if (this.realtimeLive) {
-          // Catch up on anything missed while disconnected.
-          this.requestSync(0);
-        }
-      },
-    );
-    this.pollTimer = setInterval(() => {
-      this.requestSync(0);
-    }, this.pollIntervalMs);
-    this.requestSync(0);
-  }
-
-  stop(): void {
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer);
-      this.pollTimer = null;
-    }
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer);
-      this.debounceTimer = null;
-    }
-    this.unsubscribeRealtime?.();
-    this.unsubscribeRealtime = null;
-  }
-
-  /** Schedules a sync, coalescing calls made within the debounce window. */
-  requestSync(delayMs = this.debounceMs): void {
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer);
-    }
-    this.debounceTimer = setTimeout(() => {
-      this.debounceTimer = null;
-      void this.syncNow();
-    }, delayMs);
-  }
-
-  /** Runs one sync; concurrent calls share the run and trigger one rerun. */
-  syncNow(): Promise<void> {
-    if (this.running) {
-      this.rerunRequested = true;
-      return this.running;
-    }
-    this.running = this.runLoop().finally(() => {
-      this.running = null;
-    });
-    return this.running;
-  }
-
-  getStatus(): SyncStatus {
-    return this.status;
-  }
-
-  onStatus(listener: (status: SyncStatus) => void): () => void {
-    this.statusListeners.add(listener);
-    listener(this.status);
-    return () => this.statusListeners.delete(listener);
-  }
-
-  /** Notified with design ids that were changed by a pull. */
-  onRemoteChanges(listener: (ids: string[]) => void): () => void {
-    this.remoteListeners.add(listener);
-    return () => this.remoteListeners.delete(listener);
-  }
-
-  private async runLoop(): Promise<void> {
-    const runExclusive = this.deps.runExclusive ?? ((task) => task());
-    do {
-      this.rerunRequested = false;
-      await runExclusive(() => this.runOnce());
-    } while (this.takeRerunRequest());
-  }
-
-  /** Read via a method: TS can't see the field change across the await. */
-  private takeRerunRequest(): boolean {
-    return this.rerunRequested;
-  }
-
-  private async runOnce(): Promise<void> {
-    if (!this.deps.isOnline()) {
-      this.setStatus({ state: 'offline' });
+    if (!deps.connectivity.isOnline()) {
+      store.setState({ status: 'offline' });
       return;
     }
-    this.setStatus({ state: 'syncing' });
-    const started = this.now();
+    running = true;
     try {
-      await this.pushAssets();
-      const pushed = await this.pushDesigns();
-      const pulled = await this.pull();
-      this.setStatus({
-        state: 'idle',
-        lastSyncedAt: this.now(),
-        live: this.realtimeLive,
-      });
-      this.deps.logger.info('sync.completed', {
-        pushed,
-        pulled,
-        durationMs: this.now() - started,
+      for (const [id, document] of queue) {
+        store.setState({ status: 'syncing', lastError: null });
+        await deps.transport.push(document);
+        // Keep it queued if a newer version arrived during the push.
+        if (queue.get(id) === document) {
+          queue.delete(id);
+        }
+        updatePending();
+      }
+      attempt = 0;
+      store.setState({
+        status: 'synced',
+        lastSyncedAt: deps.now(),
+        lastError: null,
       });
     } catch (error) {
-      if (error instanceof NewerSchemaVersionError) {
-        // Not a fault: another device runs a newer deploy. The cursor is
-        // not advanced, so the design is pulled again after a reload.
-        this.deps.logger.warn('sync.newer_schema_version', {
-          found: error.found,
-        });
-        this.setStatus({ state: 'update-required' });
-        return;
-      }
-      const message = error instanceof Error ? error.message : String(error);
-      this.deps.logger.error('sync.failed', { error: message });
-      this.setStatus(
-        this.deps.isOnline()
-          ? { state: 'error', message }
-          : { state: 'offline' },
-      );
-    }
-  }
-
-  private async pushAssets(): Promise<void> {
-    for (const asset of await this.deps.assets.listPendingUpload()) {
-      await this.deps.remote.uploadAsset(asset.id, asset.bytes, asset.mime);
-      await this.deps.assets.markUploaded(asset.id);
-    }
-  }
-
-  private async pushDesigns(): Promise<number> {
-    const dirty = await this.deps.local.listDirty();
-    for (const record of dirty) {
-      await this.pushDesign(record);
-    }
-    return dirty.length;
-  }
-
-  private async pushDesign(record: DesignRecord): Promise<void> {
-    const write: RemoteDesignWrite = {
-      id: record.id,
-      title: record.title,
-      document: record.document,
-      clientUpdatedAt: new Date(record.updatedAt).toISOString(),
-      deletedAt:
-        record.deleted === 1 ? new Date(record.updatedAt).toISOString() : null,
-    };
-
-    if (record.version === 0 && record.deleted === 1) {
-      await this.deps.local.hardDelete(record.id);
-      return;
-    }
-
-    const saved =
-      record.version === 0
-        ? await this.deps.remote.insert(write)
-        : await this.deps.remote.update(write, record.version);
-
-    if (!saved) {
-      await this.resolveConflict(record);
-      return;
-    }
-    if (record.deleted === 1) {
-      await this.deps.local.hardDelete(record.id);
-      return;
-    }
-    await this.deps.local.markSynced(
-      record.id,
-      saved.version,
-      record.updatedAt,
-    );
-  }
-
-  /** Server wins; the local edit survives as a separate design. */
-  private async resolveConflict(local: DesignRecord): Promise<void> {
-    const remote = await this.deps.remote.fetchById(local.id);
-    this.deps.logger.warn('sync.conflict', {
-      designId: local.id,
-      localVersion: local.version,
-      remoteVersion: remote?.version ?? null,
-    });
-    if (remote && remote.deletedAt === null) {
-      // Throws before any copy is made if a newer app wrote the server
-      // copy; otherwise every retry would add another conflicted copy.
-      upgradeDesignDocument(remote.document);
-    }
-
-    const sameContent =
-      remote !== null &&
-      remote.deletedAt === null &&
-      remote.title === local.title &&
-      JSON.stringify(remote.document) === JSON.stringify(local.document);
-
-    if (!sameContent && local.deleted === 0) {
-      await this.deps.local.create(
-        `${local.title}${CONFLICT_SUFFIX}`,
-        local.document,
-      );
-    }
-    if (remote === null) {
-      // Local id is unusable remotely; the copy above carries the work.
-      await this.deps.local.hardDelete(local.id);
-      return;
-    }
-    await this.applyRemote(remote);
-  }
-
-  private async pull(): Promise<number> {
-    let cursor = await this.readCursor();
-    let total = 0;
-    const changedIds: string[] = [];
-    for (;;) {
-      const page = await this.deps.remote.fetchChangedSince(
-        cursor,
-        this.pageSize,
-      );
-      for (const remote of page) {
-        if (await this.applyPulled(remote)) {
-          changedIds.push(remote.id);
-        }
-        cursor = { updatedAt: remote.updatedAt, id: remote.id };
-      }
-      total += page.length;
-      if (cursor) {
-        await this.deps.local.setMeta(CURSOR_KEY, JSON.stringify(cursor));
-      }
-      if (page.length < this.pageSize) {
-        break;
-      }
-    }
-    if (changedIds.length > 0) {
-      for (const listener of this.remoteListeners) {
-        listener(changedIds);
-      }
-    }
-    return total;
-  }
-
-  /** Returns true when the local copy changed. */
-  private async applyPulled(remote: RemoteDesign): Promise<boolean> {
-    const local = await this.deps.local.get(remote.id);
-    if (local && remote.version <= local.version) {
-      // Already have it (typically our own push echoing back).
-      return false;
-    }
-    if (local?.dirty === 1) {
-      await this.resolveConflict(local);
-      return true;
-    }
-    return this.applyRemote(remote);
-  }
-
-  private async applyRemote(remote: RemoteDesign): Promise<boolean> {
-    if (remote.deletedAt !== null) {
-      await this.deps.local.hardDelete(remote.id);
-      return true;
-    }
-    const document = safeParseDesignDocument(remote.document);
-    if (!document) {
-      this.deps.logger.error('sync.invalid_remote_document', {
-        designId: remote.id,
-        version: remote.version,
+      const offline = !deps.connectivity.isOnline();
+      deps.logger.warn('sync.push_failed', {
+        pending: queue.size,
+        offline,
+        error,
       });
-      return false;
+      store.setState({
+        status: offline ? 'offline' : 'error',
+        lastError: error instanceof Error ? error.message : 'Sync failed',
+      });
+      if (!offline) {
+        scheduleRetry();
+      }
+    } finally {
+      running = false;
     }
-    await this.downloadMissingAssets(referencedAssetIds(document));
-    await this.deps.local.putFromRemote({
-      id: remote.id,
-      title: remote.title,
-      document,
-      version: remote.version,
-      createdAt: Date.parse(remote.createdAt),
-      updatedAt: Date.parse(remote.clientUpdatedAt),
-    });
-    return true;
-  }
-
-  private async downloadMissingAssets(ids: string[]): Promise<void> {
-    for (const id of ids) {
-      if (await this.deps.assets.has(id)) {
-        continue;
-      }
-      const asset = await this.deps.remote.downloadAsset(id);
-      if (!asset) {
-        this.deps.logger.warn('sync.asset_missing', { assetId: id });
-        continue;
-      }
-      await this.deps.assets.putDownloaded(id, asset.mime, asset.bytes);
+    if (queue.size > 0 && store.getState().status === 'synced') {
+      void run();
     }
   }
 
-  private async readCursor(): Promise<PullCursor | null> {
-    const raw = await this.deps.local.getMeta(CURSOR_KEY);
-    if (!raw) {
-      return null;
+  const unsubscribe = deps.connectivity.subscribe(() => {
+    if (deps.connectivity.isOnline()) {
+      attempt = 0;
+      void run();
+    } else {
+      store.setState({ status: 'offline' });
     }
-    try {
-      const parsed = JSON.parse(raw) as Partial<PullCursor>;
-      const time = Date.parse(parsed.updatedAt ?? '');
-      if (!Number.isNaN(time) && typeof parsed.id === 'string') {
-        // Rewind slightly: a transaction that started earlier can commit
-        // after a later one, so its row would sit behind the cursor.
-        // Re-reading is safe because already-applied versions are skipped.
-        return {
-          updatedAt: new Date(time - CURSOR_OVERLAP_MS).toISOString(),
-          id: '',
-        };
-      }
-    } catch {
-      // Fall through: a corrupt cursor just means a full re-pull.
-    }
-    this.deps.logger.warn('sync.cursor_reset');
-    return null;
-  }
+  });
 
-  private setStatus(status: SyncStatus): void {
-    this.status = status;
-    for (const listener of this.statusListeners) {
-      listener(status);
-    }
-  }
+  return {
+    store,
+    enqueue: (document) => {
+      queue.set(document.id, document);
+      updatePending();
+      if (store.getState().status !== 'error') {
+        void run();
+      }
+    },
+    retryNow: () => {
+      attempt = 0;
+      clearTimeout(retryTimer);
+      void run();
+    },
+    dispose: () => {
+      disposed = true;
+      clearTimeout(retryTimer);
+      unsubscribe();
+    },
+  };
 }

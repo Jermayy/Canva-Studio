@@ -76,3 +76,5 @@ Previews never use production data (playbook 12: isolated environments).
 - Free-plan Supabase projects pause after about a week without activity; open the production app before sharing the link (or upgrade).
 - Production backups with point-in-time recovery (playbook 05 MUST) aren't available on the free plan: a recorded deviation until real users.
 - Confirmation emails on staging redirect to the Site URL (`localhost:5173`), so signing up from a preview confirms the account but lands on localhost; sign in on the preview afterwards.
+- **v2 (`feature-canvas-studio-v2`):** with `VITE_SUPABASE_*` unset, accounts are device-local and no backend is used; with them set, only Supabase Auth is used (designs stay encrypted on the device, sync is simulated). v2 doesn't use the v1 tables, so migrations aren't part of a v2 deploy. Go-live checklist: [docs/v2-overview.md](../v2-overview.md#action-points-to-take-v2-live).
+- **v2 password reset (Supabase mode):** reset emails link to `/reset-password`, which the existing `/**` allow-list entries cover. PKCE means the link must be opened in the browser that requested it; the user also needs their recovery code (ADR 0011).
