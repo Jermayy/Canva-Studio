@@ -18,7 +18,7 @@ Previews never use production data (playbook 12: isolated environments).
 
 **Vercel project `jermayys-projects/canvas-studio`**
 
-- Connected to GitHub `Jermayy/Canva-Studio`; production branch `main`; Git deployments **enabled** (the CLI created the project with them disabled).
+- Connected to GitHub `Jermayy/canvas-studio` (renamed from `Canva-Studio`; GitHub redirects the old URL); production branch `main`; Git deployments **enabled** (the CLI created the project with them disabled).
 - Node.js version **24.x** (also pinned by `engines` in `package.json`, `.nvmrc` and CI).
 - Deployment Protection: **Standard** (`prod_deployment_urls_and_all_previews`). The production domain is public; previews and per-deployment URLs need a Vercel login.
 - Environment variables (plain config; both values are public by design):
